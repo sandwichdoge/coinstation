@@ -8,7 +8,9 @@ from ..timeutil import to_ms
 
 router = APIRouter(prefix="/api", tags=["market"])
 
-ORDERED_INTERVALS = list(market_data.INTERVAL_MS.keys()) + ["1M"]
+# Timeframes offered in the picker. Any interval in market_data.VALID_INTERVALS
+# is still accepted by /klines; this is just the curated, ordered display set.
+ORDERED_INTERVALS = ["15m", "1h", "4h", "12h", "1d", "1w", "1M"]
 
 
 @router.get("/coins")

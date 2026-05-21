@@ -125,6 +125,18 @@ select:focus, input:focus { border-color: var(--accent); }
 .factors.risk li::before { content: "△"; color: var(--red); }
 .snap-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; margin: 10px 0; font-size: 12px; }
 .snap-grid .k { color: var(--muted); }
+.levels { margin: 12px 0; display: flex; flex-direction: column; gap: 6px; }
+.levels-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 2px; }
+.level { border-left: 3px solid var(--border); padding: 6px 0 6px 10px; background: var(--panel-2); border-radius: 0 6px 6px 0; }
+.level.res { border-left-color: var(--red); }
+.level.sup { border-left-color: var(--green); }
+.level-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.level-tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+.level.res .level-tag { color: var(--red); }
+.level.sup .level-tag { color: var(--green); }
+.level-price { font-size: 14px; font-weight: 700; }
+.level-meta { font-size: 11px; color: var(--muted); }
+.level-next { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .foot { font-size: 11px; color: var(--muted); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 
 /* Backtest */

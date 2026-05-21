@@ -47,9 +47,13 @@ export interface Snapshot {
   support?: number | null;
   support_dist_pct?: number;
   support_touches?: number;
+  support_next?: number | null;
+  support_next_touches?: number;
   resistance?: number | null;
   resistance_dist_pct?: number;
   resistance_touches?: number;
+  resistance_next?: number | null;
+  resistance_next_touches?: number;
   signals?: string[];
   window_change_pct?: number;
 }

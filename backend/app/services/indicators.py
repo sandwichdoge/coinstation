@@ -80,6 +80,7 @@ CMF_PERIOD = 20
 RECENT_WINDOW = 20  # bars of recent context for drift / basing / money-flow reads
 PIVOT_WING = 3      # bars required each side of a bar for it to count as a swing pivot
 LEVEL_TOL = 0.02    # pivots within 2% of each other are merged into one S/R level
+MIN_TOUCH_GAP = 5   # pivots closer than this many bars are one reaction, not distinct touches
 
 # Candles of warm-up to fetch before a window so EMA200 etc. are valid at start.
 WARMUP_BARS = 250
@@ -105,15 +106,22 @@ def compute_indicator_frame(df: pd.DataFrame) -> pd.DataFrame:
 # ---- support / resistance -------------------------------------------------
 
 def support_resistance(df: pd.DataFrame, price: float, wing: int = PIVOT_WING,
-                       tol: float = LEVEL_TOL) -> dict:
-    """Nearest swing-pivot support (below) and resistance (above) `price`.
+                       tol: float = LEVEL_TOL, min_gap: int = MIN_TOUCH_GAP) -> dict:
+    """Swing-pivot support/resistance around `price`, with the next level beyond.
 
     A *swing pivot* is a bar whose high (low) is the highest (lowest) in a
     window of `wing` bars on each side — a classic fractal. The last `wing` bars
     can't be confirmed pivots, which is correct: it uses no future data. Pivots
-    within `tol` of each other are merged into one level, and the number merged
-    is the level's *touch count* — a level the market has reacted to repeatedly
-    is stronger evidence than a one-off wick.
+    within `tol` of each other are merged into one level.
+
+    A level's strength is its *distinct touch count*: separate reactions to the
+    level, not raw pivot bars. Pivots closer than `min_gap` bars (e.g. a flat
+    multi-bar base, where every bar shares the window extreme) are one reaction
+    and counted once — so the count reflects how often price genuinely returned.
+
+    Returns the nearest support/resistance each side of `price`, plus the next
+    level beyond each (``support_next`` / ``resistance_next``) — i.e. where price
+    is likely headed if the nearest level is decisively breached.
     """
     n = len(df)
     if n < 2 * wing + 1 or not price:
@@ -121,39 +129,63 @@ def support_resistance(df: pd.DataFrame, price: float, wing: int = PIVOT_WING,
     high = df["high"].to_numpy(dtype=float)
     low = df["low"].to_numpy(dtype=float)
 
-    raw: list[float] = []
+    # (bar_index, price) for each confirmed swing pivot; index drives touch timing.
+    pivots: list[tuple[int, float]] = []
     for i in range(wing, n - wing):
         win = slice(i - wing, i + wing + 1)
         if low[i] == low[win].min():
-            raw.append(low[i])
+            pivots.append((i, low[i]))
         if high[i] == high[win].max():
-            raw.append(high[i])
-    if not raw:
+            pivots.append((i, high[i]))
+    if not pivots:
         return {}
 
-    # Cluster sorted pivots into levels; carry the touch count of each.
-    raw.sort()
-    clusters: list[list[float]] = [[raw[0]]]
-    for p in raw[1:]:
-        if p <= clusters[-1][-1] * (1 + tol):
-            clusters[-1].append(p)
+    # Cluster by price into levels. Anchor each pivot to the running cluster
+    # *mean* (not the previous pivot) so a chain of nearby pivots can't drift the
+    # level arbitrarily wide past `tol`.
+    pivots.sort(key=lambda p: p[1])
+    clusters: list[list[tuple[int, float]]] = [[pivots[0]]]
+    for idx, p in pivots[1:]:
+        mean = sum(q for _, q in clusters[-1]) / len(clusters[-1])
+        if p <= mean * (1 + tol):
+            clusters[-1].append((idx, p))
         else:
-            clusters.append([p])
-    levels = [(sum(c) / len(c), len(c)) for c in clusters]
+            clusters.append([(idx, p)])
 
-    out: dict = {}
+    # Per level: price = mean, touches = pivots separated by >= min_gap bars.
+    levels: list[tuple[float, int]] = []
+    for c in clusters:
+        lv = sum(q for _, q in c) / len(c)
+        touches, last = 0, None
+        for b in sorted(idx for idx, _ in c):
+            if last is None or b - last >= min_gap:
+                touches += 1
+                last = b
+        levels.append((lv, touches))
+    levels.sort(key=lambda x: x[0])
+
     below = [(lv, t) for lv, t in levels if lv <= price]
     above = [(lv, t) for lv, t in levels if lv > price]
+
+    out: dict = {}
     if below:
-        lv, t = max(below, key=lambda x: x[0])  # nearest level at/under price
+        lv, t = below[-1]  # nearest level at/under price
         out["support"] = round(lv, 6)
         out["support_touches"] = t
         out["support_dist_pct"] = round((price - lv) / price * 100, 2)
+        if len(below) >= 2:
+            nlv, nt = below[-2]  # next support down — the target if support breaks
+            out["support_next"] = round(nlv, 6)
+            out["support_next_touches"] = nt
     if above:
-        lv, t = min(above, key=lambda x: x[0])  # nearest level above price
+        lv, t = above[0]  # nearest level above price
         out["resistance"] = round(lv, 6)
         out["resistance_touches"] = t
         out["resistance_dist_pct"] = round((lv - price) / price * 100, 2)
+        if len(above) >= 2:
+            nlv, nt = above[1]  # next resistance up — the target if resistance breaks
+            out["resistance_next"] = round(nlv, 6)
+            out["resistance_next_touches"] = nt
     return out
 
 

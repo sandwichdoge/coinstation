@@ -143,7 +143,14 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         if w >= 0.05:
             add(w, f"Testing support ~{support:g} (held {sup_touches}x) — "
                    "limited downside, bounce setup")
-            risks.append(f"A decisive close below {support:g} voids the support thesis.")
+            nxt = snapshot.get("support_next")
+            if nxt:
+                drop = (support - nxt) / support * 100
+                risks.append(f"A decisive close below {support:g} opens the next "
+                             f"support ~{nxt:g} (~{drop:.1f}% lower).")
+            else:
+                risks.append(f"A decisive close below {support:g} voids the support "
+                             "thesis with no clear level beneath.")
     if resistance and res_dist is not None and 0 <= res_dist <= 4.0 and res_touches >= 2:
         prox = 1.0 - res_dist / 4.0
         strength = min(1.0, 0.4 + 0.2 * res_touches)
@@ -151,7 +158,14 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         if abs(w) >= 0.05:
             add(w, f"Capped at resistance ~{resistance:g} (rejected {res_touches}x) — "
                    "limited upside")
-            risks.append(f"A breakout above {resistance:g} voids the resistance thesis.")
+            nxt = snapshot.get("resistance_next")
+            if nxt:
+                rise = (nxt - resistance) / resistance * 100
+                risks.append(f"A breakout above {resistance:g} opens the next "
+                             f"resistance ~{nxt:g} (~{rise:.1f}% higher).")
+            else:
+                risks.append(f"A breakout above {resistance:g} clears overhead "
+                             "resistance with open air above.")
 
     # --- Recent realised drift (last ~20 bars): the live momentum, distinct
     #     from the laggy EMA regime. The full-window change is kept only for the

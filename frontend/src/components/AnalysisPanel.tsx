@@ -69,6 +69,46 @@ export function AnalysisPanel({ result, loading, error, aiEnabled, onAnalyze }: 
             </ul>
           )}
 
+          {snap && (snap.support != null || snap.resistance != null) && (
+            <div className="levels">
+              <div className="levels-title">Key levels</div>
+              {snap.resistance != null && (
+                <div className="level res">
+                  <div className="level-head">
+                    <span className="level-tag">Resistance</span>
+                    <span className="level-price">{fmtPrice(snap.resistance)}</span>
+                    <span className="level-meta">
+                      {snap.resistance_dist_pct != null && `${fmtNum(snap.resistance_dist_pct, 1)}% above`}
+                      {snap.resistance_touches != null && ` · rejected ${snap.resistance_touches}×`}
+                    </span>
+                  </div>
+                  <div className="level-next">
+                    {snap.resistance_next != null
+                      ? `If breached → next ~${fmtPrice(snap.resistance_next)}`
+                      : "If breached → open air above"}
+                  </div>
+                </div>
+              )}
+              {snap.support != null && (
+                <div className="level sup">
+                  <div className="level-head">
+                    <span className="level-tag">Support</span>
+                    <span className="level-price">{fmtPrice(snap.support)}</span>
+                    <span className="level-meta">
+                      {snap.support_dist_pct != null && `${fmtNum(snap.support_dist_pct, 1)}% below`}
+                      {snap.support_touches != null && ` · held ${snap.support_touches}×`}
+                    </span>
+                  </div>
+                  <div className="level-next">
+                    {snap.support_next != null
+                      ? `If breached → next ~${fmtPrice(snap.support_next)}`
+                      : "If breached → no clear level beneath"}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {snap && (
             <div className="snap-grid">
               <div className="k">Price</div>
@@ -81,14 +121,6 @@ export function AnalysisPanel({ result, loading, error, aiEnabled, onAnalyze }: 
               <div>
                 {fmtPrice(snap.ema50)} / {fmtPrice(snap.ema200)}
               </div>
-              {(snap.support != null || snap.resistance != null) && (
-                <>
-                  <div className="k">Support / Resist.</div>
-                  <div>
-                    {fmtPrice(snap.support)} / {fmtPrice(snap.resistance)}
-                  </div>
-                </>
-              )}
             </div>
           )}
 

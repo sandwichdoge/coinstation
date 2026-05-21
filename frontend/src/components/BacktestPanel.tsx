@@ -189,7 +189,7 @@ export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled
             candles={result.candles}
             indicators={indicators}
             markers={result.markers}
-            heights={{ price: 320, rsi: 110, macd: 130 }}
+            heights={{ price: 320, volume: 90, rsi: 110, macd: 130 }}
           />
 
           {result.trades.length > 0 && (

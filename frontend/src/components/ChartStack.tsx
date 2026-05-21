@@ -20,6 +20,7 @@ interface Refs {
   charts: IChartApi[];
   candle: ISeriesApi<"Candlestick">;
   volume: ISeriesApi<"Histogram">;
+  volMa: ISeriesApi<"Line">;
   ema20: ISeriesApi<"Line">;
   ema50: ISeriesApi<"Line">;
   ema200: ISeriesApi<"Line">;
@@ -36,26 +37,33 @@ interface Props {
   candles: Candle[];
   indicators?: Indicators | Record<string, never>;
   markers?: ChartMarker[];
-  heights?: { price: number; rsi: number; macd: number };
+  heights?: { price: number; volume: number; rsi: number; macd: number };
 }
 
 export function ChartStack({ candles, indicators, markers, heights }: Props) {
   const priceEl = useRef<HTMLDivElement>(null);
+  const volEl = useRef<HTMLDivElement>(null);
   const rsiEl = useRef<HTMLDivElement>(null);
   const macdEl = useRef<HTMLDivElement>(null);
   const refs = useRef<Refs | null>(null);
   const lastKey = useRef<string>("");
 
-  const H = heights ?? { price: 380, rsi: 120, macd: 150 };
+  const H = heights ?? { price: 360, volume: 110, rsi: 120, macd: 150 };
 
   // ---- create charts once ----
   useEffect(() => {
-    if (!priceEl.current || !rsiEl.current || !macdEl.current) return;
+    if (!priceEl.current || !volEl.current || !rsiEl.current || !macdEl.current) return;
 
     const price = createChart(priceEl.current, {
       ...baseChartOptions(),
       height: H.price,
       width: priceEl.current.clientWidth,
+      timeScale: { ...baseChartOptions().timeScale, visible: false },
+    });
+    const vol = createChart(volEl.current, {
+      ...baseChartOptions(),
+      height: H.volume,
+      width: volEl.current.clientWidth,
       timeScale: { ...baseChartOptions().timeScale, visible: false },
     });
     const rsi = createChart(rsiEl.current, {
@@ -77,11 +85,12 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
       wickUpColor: COLORS.up,
       wickDownColor: COLORS.down,
     });
-    const volume = price.addHistogramSeries({
+    const volume = vol.addHistogramSeries({
       priceFormat: { type: "volume" },
-      priceScaleId: "vol",
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
-    price.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    vol.priceScale("right").applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } });
 
     const thinLine = (chart: IChartApi, color: string, style = LineStyle.Solid, width = 1) =>
       chart.addLineSeries({
@@ -100,6 +109,8 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
     const bbM = thinLine(price, COLORS.bb, LineStyle.Dotted);
     const bbL = thinLine(price, COLORS.bb, LineStyle.Dashed);
 
+    const volMa = thinLine(vol, COLORS.ema50);
+
     const rsiSeries = rsi.addLineSeries({ color: "#c792ea", lineWidth: 1, priceLineVisible: false });
     rsiSeries.createPriceLine({ price: 70, color: COLORS.down, lineStyle: LineStyle.Dashed, lineWidth: 1, title: "70" });
     rsiSeries.createPriceLine({ price: 30, color: COLORS.up, lineStyle: LineStyle.Dashed, lineWidth: 1, title: "30" });
@@ -109,9 +120,9 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
     const signalLine = thinLine(macd, COLORS.signal);
     macdLine.createPriceLine({ price: 0, color: COLORS.border, lineStyle: LineStyle.Dotted, lineWidth: 1, title: "" });
 
-    const charts = [price, rsi, macd];
+    const charts = [price, vol, rsi, macd];
     refs.current = {
-      charts, candle, volume, ema20, ema50, ema200, bbU, bbM, bbL,
+      charts, candle, volume, volMa, ema20, ema50, ema200, bbU, bbM, bbL,
       rsi: rsiSeries, macd: macdLine, signal: signalLine, hist,
     };
 
@@ -140,7 +151,7 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
       lastKey.current = "";
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [H.price, H.rsi, H.macd]);
+  }, [H.price, H.volume, H.rsi, H.macd]);
 
   // ---- push data on change ----
   useEffect(() => {
@@ -166,6 +177,7 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
     r.bbM.setData(toLine(ov.bb_mid ?? []));
     r.bbL.setData(toLine(ov.bb_lower ?? []));
     r.volume.setData(toHist(ind?.volume?.points ?? []));
+    r.volMa.setData(toLine(ind?.volume?.ma ?? []));
     r.rsi.setData(toLine(ind?.rsi?.points ?? []));
     r.macd.setData(toLine(ind?.macd?.macd ?? []));
     r.signal.setData(toLine(ind?.macd?.signal ?? []));
@@ -202,6 +214,8 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
   return (
     <div className="chart-stack">
       <div className="chart-pane" ref={priceEl} />
+      <div className="chart-pane-label">Volume (MA 20)</div>
+      <div className="chart-pane" ref={volEl} />
       <div className="chart-pane-label">RSI ({(indicators as Indicators)?.rsi?.period ?? 14})</div>
       <div className="chart-pane" ref={rsiEl} />
       <div className="chart-pane-label">MACD (12, 26, 9)</div>
