@@ -44,6 +44,12 @@ export interface Snapshot {
   ema200?: number | null;
   bb_upper?: number | null;
   bb_lower?: number | null;
+  support?: number | null;
+  support_dist_pct?: number;
+  support_touches?: number;
+  resistance?: number | null;
+  resistance_dist_pct?: number;
+  resistance_touches?: number;
   signals?: string[];
   window_change_pct?: number;
 }

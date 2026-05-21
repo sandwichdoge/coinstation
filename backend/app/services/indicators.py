@@ -78,6 +78,8 @@ BB_PARAMS = (20, 2.0)
 VOL_MA_PERIOD = 20
 CMF_PERIOD = 20
 RECENT_WINDOW = 20  # bars of recent context for drift / basing / money-flow reads
+PIVOT_WING = 3      # bars required each side of a bar for it to count as a swing pivot
+LEVEL_TOL = 0.02    # pivots within 2% of each other are merged into one S/R level
 
 # Candles of warm-up to fetch before a window so EMA200 etc. are valid at start.
 WARMUP_BARS = 250
@@ -97,6 +99,61 @@ def compute_indicator_frame(df: pd.DataFrame) -> pd.DataFrame:
     out["vol_ma"] = sma(out["volume"], VOL_MA_PERIOD)
     out["obv"] = obv(close, out["volume"])
     out["cmf"] = chaikin_money_flow(out["high"], out["low"], close, out["volume"], CMF_PERIOD)
+    return out
+
+
+# ---- support / resistance -------------------------------------------------
+
+def support_resistance(df: pd.DataFrame, price: float, wing: int = PIVOT_WING,
+                       tol: float = LEVEL_TOL) -> dict:
+    """Nearest swing-pivot support (below) and resistance (above) `price`.
+
+    A *swing pivot* is a bar whose high (low) is the highest (lowest) in a
+    window of `wing` bars on each side — a classic fractal. The last `wing` bars
+    can't be confirmed pivots, which is correct: it uses no future data. Pivots
+    within `tol` of each other are merged into one level, and the number merged
+    is the level's *touch count* — a level the market has reacted to repeatedly
+    is stronger evidence than a one-off wick.
+    """
+    n = len(df)
+    if n < 2 * wing + 1 or not price:
+        return {}
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+
+    raw: list[float] = []
+    for i in range(wing, n - wing):
+        win = slice(i - wing, i + wing + 1)
+        if low[i] == low[win].min():
+            raw.append(low[i])
+        if high[i] == high[win].max():
+            raw.append(high[i])
+    if not raw:
+        return {}
+
+    # Cluster sorted pivots into levels; carry the touch count of each.
+    raw.sort()
+    clusters: list[list[float]] = [[raw[0]]]
+    for p in raw[1:]:
+        if p <= clusters[-1][-1] * (1 + tol):
+            clusters[-1].append(p)
+        else:
+            clusters.append([p])
+    levels = [(sum(c) / len(c), len(c)) for c in clusters]
+
+    out: dict = {}
+    below = [(lv, t) for lv, t in levels if lv <= price]
+    above = [(lv, t) for lv, t in levels if lv > price]
+    if below:
+        lv, t = max(below, key=lambda x: x[0])  # nearest level at/under price
+        out["support"] = round(lv, 6)
+        out["support_touches"] = t
+        out["support_dist_pct"] = round((price - lv) / price * 100, 2)
+    if above:
+        lv, t = min(above, key=lambda x: x[0])  # nearest level above price
+        out["resistance"] = round(lv, 6)
+        out["resistance_touches"] = t
+        out["resistance_dist_pct"] = round((lv - price) / price * 100, 2)
     return out
 
 
@@ -209,6 +266,11 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
             if base_vol:
                 snap["vol_contraction"] = round(recent_vol / base_vol, 3)  # < 1 = volatility contracting
 
+    # --- swing support/resistance: price reaction levels from the whole frame
+    #     (warm-up included), so basing near a long-held support is visible. ---
+    if price is not None:
+        snap.update(support_resistance(df_ind, price))
+
     signals: list[str] = []
     cmf_v = snap.get("cmf")
     if cmf_v is not None:
@@ -238,6 +300,11 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
         )
     if price is not None and snap["ema200"] is not None:
         signals.append("Price above EMA200" if price >= snap["ema200"] else "Price below EMA200")
+    sup_d, res_d = snap.get("support_dist_pct"), snap.get("resistance_dist_pct")
+    if sup_d is not None and sup_d <= 3.0 and (snap.get("support_touches") or 0) >= 2:
+        signals.append(f"Testing support (held {snap['support_touches']}x)")
+    elif res_d is not None and res_d <= 3.0 and (snap.get("resistance_touches") or 0) >= 2:
+        signals.append(f"Capped at resistance (rejected {snap['resistance_touches']}x)")
     snap["signals"] = signals
 
     first_close = df_ind.iloc[0]["close"]

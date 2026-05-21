@@ -124,6 +124,35 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         add(-0.5, "Price at/above upper Bollinger band (stretched high)")
         risks.append("Price extended above the upper Bollinger band")
 
+    # --- Swing support / resistance: the explicit "don't strong-sell the
+    #     bottom" guard the trend-follower otherwise lacks. Selling into a
+    #     well-tested support (or buying into resistance) is poor risk/reward —
+    #     the level caps the move and a bounce/rejection is the base case. The
+    #     pull grows the closer price sits to the level and the more times the
+    #     level has held, so a fresh STRONG SELL landing on multi-touch support
+    #     is tempered toward SELL/HOLD rather than amplified. ---
+    support, sup_dist = snapshot.get("support"), snapshot.get("support_dist_pct")
+    sup_touches = snapshot.get("support_touches") or 0
+    resistance, res_dist = snapshot.get("resistance"), snapshot.get("resistance_dist_pct")
+    res_touches = snapshot.get("resistance_touches") or 0
+
+    if support and sup_dist is not None and 0 <= sup_dist <= 4.0 and sup_touches >= 2:
+        prox = 1.0 - sup_dist / 4.0                     # 1 at the level → 0 by 4% above
+        strength = min(1.0, 0.4 + 0.2 * sup_touches)    # more touches → firmer level
+        w = round(2.0 * prox * strength, 2)             # up to +2.0 right on strong support
+        if w >= 0.05:
+            add(w, f"Testing support ~{support:g} (held {sup_touches}x) — "
+                   "limited downside, bounce setup")
+            risks.append(f"A decisive close below {support:g} voids the support thesis.")
+    if resistance and res_dist is not None and 0 <= res_dist <= 4.0 and res_touches >= 2:
+        prox = 1.0 - res_dist / 4.0
+        strength = min(1.0, 0.4 + 0.2 * res_touches)
+        w = round(-2.0 * prox * strength, 2)            # up to -2.0 right under strong resistance
+        if abs(w) >= 0.05:
+            add(w, f"Capped at resistance ~{resistance:g} (rejected {res_touches}x) — "
+                   "limited upside")
+            risks.append(f"A breakout above {resistance:g} voids the resistance thesis.")
+
     # --- Recent realised drift (last ~20 bars): the live momentum, distinct
     #     from the laggy EMA regime. The full-window change is kept only for the
     #     rationale text — scoring it just restates the trend and amplifies lag. ---
@@ -211,8 +240,9 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     summary = f"Rule-based signal: {action.replace('_', ' ').upper()} (score {score:+.1f})."
     rationale = (
         "Weighs EMA trend regime, price-vs-mean, MACD momentum, RSI, Bollinger"
-        " position, volume, Chaikin money flow and an accumulation/distribution"
-        " read into a single score; mean-reversion only at RSI/band extremes."
+        " position, volume, Chaikin money flow, swing support/resistance and an"
+        " accumulation/distribution read into a single score; mean-reversion only"
+        " at RSI/band extremes or established support/resistance."
         + chg_txt
         + news_txt
         + " Set OPENAI_API_KEY to enable news-aware AI analysis."

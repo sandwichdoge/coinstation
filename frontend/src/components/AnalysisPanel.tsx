@@ -81,6 +81,14 @@ export function AnalysisPanel({ result, loading, error, aiEnabled, onAnalyze }: 
               <div>
                 {fmtPrice(snap.ema50)} / {fmtPrice(snap.ema200)}
               </div>
+              {(snap.support != null || snap.resistance != null) && (
+                <>
+                  <div className="k">Support / Resist.</div>
+                  <div>
+                    {fmtPrice(snap.support)} / {fmtPrice(snap.resistance)}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
