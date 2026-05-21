@@ -1,20 +1,14 @@
-"""AI analysis: combine the technical snapshot with recent news into a
+"""Rule-based analysis: turn a technical-indicator snapshot into a
 recommendation (action + 0-100 confidence + rationale).
 
-Two paths share one output shape:
-  * OpenAI when OPENAI_API_KEY is set.
-  * A transparent rule-based scorer otherwise (or if the API call fails), so the
-    product — including the AI backtest strategy — always works.
+A transparent, auditable scorer — every signal that fires is recorded so the
+rationale can be traced back to its inputs. News headlines are accepted for
+context/display but are not modelled in the score.
 """
 from __future__ import annotations
 
-import json
-
-from ..config import settings
 from ..schemas import AnalysisResult
 from ..timeutil import ms_to_iso
-
-VALID_ACTIONS = ("strong_buy", "buy", "hold", "sell", "strong_sell")
 
 
 def _horizon(interval: str) -> str:
@@ -318,7 +312,6 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         " mean-reversion only at RSI/band extremes or established support/resistance."
         + chg_txt
         + news_txt
-        + " Set OPENAI_API_KEY to enable news-aware AI analysis."
     )
     if not risks:
         risks.append("Indicator-only signal; ignores fundamentals and news sentiment.")
@@ -330,82 +323,7 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         "rationale": rationale,
         "key_factors": factors or ["Insufficient indicator data"],
         "risks": risks,
-        "source": "rule-based",
-        "model": None,
     }
-
-
-# ---- OpenAI path ----------------------------------------------------------
-
-_SYSTEM = (
-    "You are a disciplined cryptocurrency trading analyst. You are given a "
-    "technical-indicator snapshot and recent news headlines for one asset, all "
-    "as of a specific timestamp. Reason ONLY from the information provided and "
-    "general market principles — do not use any knowledge of events after the "
-    "given timestamp. Weigh technicals and news together. Respond with a single "
-    "JSON object and nothing else, using exactly these keys: "
-    '{"action": one of ["strong_buy","buy","hold","sell","strong_sell"], '
-    '"confidence": number 0-100, "horizon": short string, "summary": one sentence, '
-    '"rationale": 2-4 sentences, "key_factors": string[], "risks": string[]}. '
-    "Confidence reflects conviction, not predicted return."
-)
-
-
-def _normalize(data: dict, interval: str) -> dict:
-    action = str(data.get("action", "hold")).lower().strip()
-    if action not in VALID_ACTIONS:
-        action = "hold"
-    try:
-        confidence = max(0.0, min(100.0, float(data.get("confidence", 50))))
-    except (TypeError, ValueError):
-        confidence = 50.0
-
-    def _strlist(v) -> list[str]:
-        if isinstance(v, list):
-            return [str(x) for x in v][:8]
-        return [str(v)] if v else []
-
-    return {
-        "action": action,
-        "confidence": round(confidence, 1),
-        "horizon": str(data.get("horizon") or _horizon(interval)),
-        "summary": str(data.get("summary", "")).strip() or "AI analysis.",
-        "rationale": str(data.get("rationale", "")).strip(),
-        "key_factors": _strlist(data.get("key_factors")),
-        "risks": _strlist(data.get("risks")),
-        "source": "openai",
-        "model": settings.openai_model,
-    }
-
-
-async def _openai(snapshot: dict, headlines: list[dict], symbol: str, interval: str, as_of_iso: str) -> dict:
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url or None,
-    )
-    user_payload = {
-        "symbol": symbol,
-        "interval": interval,
-        "as_of": as_of_iso,
-        "technical_snapshot": snapshot,
-        "news_headlines": [
-            {"title": h["title"], "source": h["source"], "published_at": h["published_at"]}
-            for h in headlines
-        ],
-    }
-    resp = await client.chat.completions.create(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": json.dumps(user_payload, default=str)},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-    content = resp.choices[0].message.content or "{}"
-    return _normalize(json.loads(content), interval)
 
 
 # ---- public entrypoint ----------------------------------------------------
@@ -419,14 +337,7 @@ async def analyze(
     headlines: list[dict],
 ) -> AnalysisResult:
     as_of_iso = ms_to_iso(as_of_ms)
-    if settings.ai_enabled:
-        try:
-            core = await _openai(snapshot, headlines, symbol, interval, as_of_iso)
-        except Exception as exc:  # any SDK/network/parse failure → graceful fallback
-            core = _heuristic(snapshot, headlines, interval)
-            core["summary"] = f"[AI unavailable: {exc}] " + core["summary"]
-    else:
-        core = _heuristic(snapshot, headlines, interval)
+    core = _heuristic(snapshot, headlines, interval)
 
     return AnalysisResult(
         symbol=symbol,

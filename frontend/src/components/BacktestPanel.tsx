@@ -9,7 +9,7 @@ const STRATEGIES = [
   { id: "macd", label: "MACD crossover" },
   { id: "rsi", label: "RSI bands" },
   { id: "ema_cross", label: "EMA 50/200 cross" },
-  { id: "ai", label: "AI (news + technicals)" },
+  { id: "rules", label: "Rule-based (technicals)" },
   { id: "buy_hold", label: "Buy & Hold" },
 ];
 const BT_INTERVALS = ["1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w"];
@@ -25,7 +25,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
 
 const tone = (v: number): "up" | "down" => (v >= 0 ? "up" : "down");
 
-export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled: boolean | null }) {
+export function BacktestPanel({ symbol }: { symbol: string }) {
   const [strategy, setStrategy] = useState("macd");
   const [interval, setInterval] = useState("1d");
   const [start, setStart] = useState(daysAgoISO(365 * 2));
@@ -34,8 +34,8 @@ export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled
   const [fee, setFee] = useState(0.1);
   const [rsiBuy, setRsiBuy] = useState(30);
   const [rsiSell, setRsiSell] = useState(70);
-  const [aiEvery, setAiEvery] = useState(14);
-  const [aiConf, setAiConf] = useState(60);
+  const [evalEvery, setEvalEvery] = useState(14);
+  const [minConf, setMinConf] = useState(60);
 
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,8 +55,8 @@ export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled
         fee_pct: fee,
         rsi_buy: rsiBuy,
         rsi_sell: rsiSell,
-        ai_rebalance_every: aiEvery,
-        ai_confidence_threshold: aiConf,
+        rules_rebalance_every: evalEvery,
+        rules_confidence_threshold: minConf,
       };
       setResult(await api.backtest(body));
     } catch (e) {
@@ -76,7 +76,7 @@ export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled
     <div className="panel section-gap">
       <div className="panel-title">
         <span>
-          Backtest <span className="sub">{symbol} · date-aware, news included</span>
+          Backtest <span className="sub">{symbol} · date-aware, technicals only</span>
         </span>
       </div>
 
@@ -130,15 +130,15 @@ export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled
             </div>
           </>
         )}
-        {strategy === "ai" && (
+        {strategy === "rules" && (
           <>
             <div className="control-group">
               <label>Eval every (bars)</label>
-              <input type="number" value={aiEvery} min={1} onChange={(e) => setAiEvery(+e.target.value)} style={{ width: 90 }} />
+              <input type="number" value={evalEvery} min={1} onChange={(e) => setEvalEvery(+e.target.value)} style={{ width: 90 }} />
             </div>
             <div className="control-group">
               <label>Min confidence</label>
-              <input type="number" value={aiConf} min={0} max={100} onChange={(e) => setAiConf(+e.target.value)} style={{ width: 90 }} />
+              <input type="number" value={minConf} min={0} max={100} onChange={(e) => setMinConf(+e.target.value)} style={{ width: 90 }} />
             </div>
           </>
         )}
@@ -151,11 +151,10 @@ export function BacktestPanel({ symbol, aiEnabled }: { symbol: string; aiEnabled
         </div>
       </div>
 
-      {strategy === "ai" && (
+      {strategy === "rules" && (
         <div className="empty" style={{ marginTop: -4 }}>
-          {aiEnabled
-            ? "AI strategy calls OpenAI at each evaluation bar with news as of that date — this can be slow/costly over long ranges."
-            : "AI strategy runs with the rule-based engine (no OPENAI_API_KEY set), so it stays fast and free."}
+          Evaluates the rule-based engine every N bars on technicals only — buys on buy/strong_buy
+          and sells on sell/strong_sell once confidence clears the threshold.
         </div>
       )}
 

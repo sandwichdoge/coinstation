@@ -15,11 +15,6 @@ class Settings(BaseSettings):
     # --- Database ---
     database_url: str = "sqlite:///./coinstation.db"
 
-    # --- OpenAI ---
-    openai_api_key: str | None = None
-    openai_model: str = "gpt-4o-mini"
-    openai_base_url: str | None = None
-
     # --- News feeds (comma-separated) ---
     rss_feeds: str = (
         "https://www.coindesk.com/arc/outboundfeeds/rss/,"
@@ -38,10 +33,6 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-
-    @property
-    def ai_enabled(self) -> bool:
-        return bool(self.openai_api_key)
 
 
 settings = Settings()

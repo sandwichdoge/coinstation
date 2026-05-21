@@ -5,7 +5,6 @@ pandas>=2.2,<3.0
 numpy>=1.26
 SQLAlchemy>=2.0,<3.0
 feedparser>=6.0,<7.0
-openai>=1.50
 pydantic>=2.7
 pydantic-settings>=2.3
 python-dateutil>=2.9

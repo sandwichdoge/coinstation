@@ -1,4 +1,4 @@
-"""AI analysis endpoint: technicals + news (as-of) -> action + confidence."""
+"""Analysis endpoint: rule-based technicals (as-of) -> action + confidence."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..schemas import AnalysisResult, AnalyzeRequest
-from ..services import ai, indicators, market_data
+from ..services import analysis, indicators, market_data
 from ..services import news as news_svc
 from ..timeutil import now_ms, to_ms
 
@@ -33,7 +33,7 @@ async def analyze(req: AnalyzeRequest, db: Session = Depends(get_db)) -> Analysi
     items = news_svc.get_news(db, symbol=req.symbol, before_ms=as_of_ms, limit=req.news_limit)
     headlines = [news_svc.to_dict(i) for i in items]
 
-    return await ai.analyze(
+    return await analysis.analyze(
         symbol=req.symbol.upper(),
         interval=req.interval,
         as_of_ms=as_of_ms,

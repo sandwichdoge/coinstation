@@ -106,10 +106,10 @@ export default function App() {
           <h1>
             Coin<span className="dot">Station</span>
           </h1>
-          <span className="tag-line">price action · indicators · news · AI · backtest</span>
+          <span className="tag-line">price action · indicators · news · analysis · backtest</span>
         </div>
-        <span className={`badge ${health?.ai_enabled ? "on" : "off"}`}>
-          {health ? (health.ai_enabled ? `AI: ${health.model}` : "AI: rule-based fallback") : "connecting…"}
+        <span className={`badge ${health ? "on" : "off"}`}>
+          {health ? "Rule-based engine" : "connecting…"}
         </span>
       </header>
 
@@ -175,14 +175,13 @@ export default function App() {
             result={analysis}
             loading={analysisLoading}
             error={analysisError}
-            aiEnabled={health?.ai_enabled ?? null}
             onAnalyze={runAnalyze}
           />
           <NewsPanel items={news} loading={newsLoading} asOf={asOf} onRefresh={fetchNews} />
         </div>
       </div>
 
-      <BacktestPanel symbol={symbol} aiEnabled={health?.ai_enabled ?? null} />
+      <BacktestPanel symbol={symbol} />
     </div>
   );
 }

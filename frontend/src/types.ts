@@ -92,8 +92,6 @@ export interface AnalysisResult {
   technical_snapshot: Snapshot;
   news_considered: number;
   headlines: { title: string; source: string; published_at: string; link?: string }[];
-  source: string;
-  model: string | null;
 }
 
 export interface Trade {
@@ -151,6 +149,5 @@ export interface BacktestResult {
 
 export interface Health {
   status: string;
-  ai_enabled: boolean;
-  model: string | null;
+  engine?: string;
 }

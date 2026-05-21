@@ -5,18 +5,17 @@ interface Props {
   result: AnalysisResult | null;
   loading: boolean;
   error: string | null;
-  aiEnabled: boolean | null;
   onAnalyze: () => void;
 }
 
-export function AnalysisPanel({ result, loading, error, aiEnabled, onAnalyze }: Props) {
+export function AnalysisPanel({ result, loading, error, onAnalyze }: Props) {
   const snap = result?.technical_snapshot;
   return (
     <div className="panel analysis">
       <div className="panel-title">
         <span>
-          AI Analysis{" "}
-          <span className="sub">{aiEnabled ? "OpenAI" : "rule-based (no API key)"}</span>
+          Analysis{" "}
+          <span className="sub">rule-based</span>
         </span>
         <button className="btn" style={{ padding: "5px 12px" }} onClick={onAnalyze} disabled={loading}>
           {loading ? "Analyzing…" : "Analyze"}
@@ -27,8 +26,8 @@ export function AnalysisPanel({ result, loading, error, aiEnabled, onAnalyze }: 
 
       {!result && !error && (
         <div className="empty">
-          Combines the technical snapshot with recent news (as of the selected time) into an
-          action and confidence score.
+          Scores the technical snapshot (as of the selected time) into an action and confidence.
+          Recent headlines are shown for context but don't affect the score.
         </div>
       )}
 
@@ -125,8 +124,8 @@ export function AnalysisPanel({ result, loading, error, aiEnabled, onAnalyze }: 
           )}
 
           <div className="foot">
-            {result.source === "openai" ? `Model: ${result.model}` : "Rule-based engine"} · considered{" "}
-            {result.news_considered} headline(s) · as of {new Date(result.as_of).toLocaleString()}
+            Rule-based engine · considered {result.news_considered} headline(s) · as of{" "}
+            {new Date(result.as_of).toLocaleString()}
           </div>
         </>
       )}

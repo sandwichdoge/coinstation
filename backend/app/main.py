@@ -45,11 +45,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health() -> dict:
-    return {
-        "status": "ok",
-        "ai_enabled": settings.ai_enabled,
-        "model": settings.openai_model if settings.ai_enabled else None,
-    }
+    return {"status": "ok", "engine": "rule-based"}
 
 
 app.include_router(market.router)

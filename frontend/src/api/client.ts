@@ -64,8 +64,8 @@ export interface BacktestBody {
   fee_pct: number;
   rsi_buy?: number;
   rsi_sell?: number;
-  ai_rebalance_every?: number;
-  ai_confidence_threshold?: number;
+  rules_rebalance_every?: number;
+  rules_confidence_threshold?: number;
 }
 
 export const api = {

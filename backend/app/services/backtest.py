@@ -2,8 +2,8 @@
 
 Pulls warm-up history before `start` so indicators are valid from the first
 traded bar, then simulates a long/flat (spot) strategy bar by bar and compares
-it to buy & hold. The `ai` strategy calls the same `ai.analyze` used live, with
-`as_of` set to each bar's timestamp; backtests run on technicals only (no news).
+it to buy & hold. The `rules` strategy calls the same `analysis.analyze` used
+live, with `as_of` set to each bar's timestamp (technicals only — no news).
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import pandas as pd
 
 from ..schemas import BacktestRequest
 from ..timeutil import ms_to_iso, now_ms, to_ms
-from . import ai, indicators, market_data
+from . import analysis, indicators, market_data
 
 YEAR_MS = 365.25 * 24 * 3600 * 1000
 
@@ -64,26 +64,26 @@ async def _signal(
             return "sell"
         return "hold"
 
-    if strat == "ai":
+    if strat == "rules":
         # Evaluate periodically to bound cost/latency.
-        if j % req.ai_rebalance_every != 0:
+        if j % req.rules_rebalance_every != 0:
             return "hold"
         snapshot = indicators.latest_snapshot(ind.iloc[: idx + 1])
         as_of_ms = int(row["time"]) * 1000
-        result = await ai.analyze(
+        result = await analysis.analyze(
             symbol=req.symbol, interval=req.interval, as_of_ms=as_of_ms,
             snapshot=snapshot, headlines=[],
         )
         if (
             position == 0
             and result.action in ("buy", "strong_buy")
-            and result.confidence >= req.ai_confidence_threshold
+            and result.confidence >= req.rules_confidence_threshold
         ):
             return "buy"
         if (
             position == 1
             and result.action in ("sell", "strong_sell")
-            and result.confidence >= req.ai_confidence_threshold
+            and result.confidence >= req.rules_confidence_threshold
         ):
             return "sell"
         return "hold"
