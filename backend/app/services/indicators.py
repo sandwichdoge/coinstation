@@ -189,6 +189,132 @@ def support_resistance(df: pd.DataFrame, price: float, wing: int = PIVOT_WING,
     return out
 
 
+# ---- reversal / exhaustion (multi-candle) ---------------------------------
+
+REVERSAL_WINDOW = 2 * RECENT_WINDOW  # bars scanned for divergences / swings
+RSI_DIV_MARGIN = 2.0                 # min RSI gap (points) for a real divergence
+VOL_CLIMAX_MULT = 2.0                # volume >= this * MA to count as a climax bar
+CLIMAX_LOOKBACK = 6                  # only a recent spike is an actionable climax
+
+
+def reversal_signals(df_ind: pd.DataFrame, price: float, wing: int = PIVOT_WING,
+                     window: int = REVERSAL_WINDOW) -> dict:
+    """Reads that span many candles rather than the latest bar — the turns the
+    single-bar snapshot is structurally blind to:
+
+      * **RSI divergence** — price prints a lower low (or higher high) that the
+        oscillator refuses to confirm: the classic momentum-exhaustion reversal.
+      * **MACD-histogram momentum turn** — how many consecutive bars the
+        histogram has been rising or falling, catching a turn *before* the
+        signal-line crossover the snapshot already reports.
+      * **Volume climax** — a volume spike on a wide bar pinned to the window's
+        extreme: a selling climax at the low (capitulation / bottom) or a buying
+        climax at the high (blow-off / top).
+
+    Uses only confirmed swing pivots (the last `wing` bars stay unconfirmed), so
+    like `support_resistance` it never peeks at future data.
+    """
+    out: dict = {}
+    n = len(df_ind)
+    if not price or n < 2 * wing + 3:
+        return out
+    tail = df_ind.tail(window)
+    low = tail["low"].to_numpy(dtype=float)
+    high = tail["high"].to_numpy(dtype=float)
+    close = tail["close"].to_numpy(dtype=float)
+    m = len(tail)
+
+    swing_lows: list[int] = []
+    swing_highs: list[int] = []
+    for i in range(wing, m - wing):
+        seg = slice(i - wing, i + wing + 1)
+        if low[i] == low[seg].min():
+            swing_lows.append(i)
+        if high[i] == high[seg].max():
+            swing_highs.append(i)
+
+    def _distinct(idxs: list[int], vals: np.ndarray, pick_min: bool) -> list[int]:
+        """Collapse pivots within MIN_TOUCH_GAP bars (one reaction, e.g. a flat
+        multi-bar base) into a single swing, keeping the most extreme bar — so
+        consecutive bars sharing a window extreme don't masquerade as two swings."""
+        kept: list[int] = []
+        for i in idxs:
+            if kept and i - kept[-1] < MIN_TOUCH_GAP:
+                if (vals[i] < vals[kept[-1]]) == pick_min:
+                    kept[-1] = i
+            else:
+                kept.append(i)
+        return kept
+
+    swing_lows = _distinct(swing_lows, low, pick_min=True)
+    swing_highs = _distinct(swing_highs, high, pick_min=False)
+
+    # --- RSI divergence between the two most recent like swings. Restrict each
+    #     side to its own half of the range (lows in <50, highs in >50) so we
+    #     only flag exhaustion where it carries weight. If both fire, the more
+    #     recent confirming swing wins. ---
+    if "rsi" in tail:
+        rv = tail["rsi"].to_numpy(dtype=float)
+        bull_at = bear_at = -1
+        if len(swing_lows) >= 2:
+            a, b = swing_lows[-2], swing_lows[-1]
+            if (not np.isnan(rv[a]) and not np.isnan(rv[b])
+                    and low[b] < low[a] and rv[b] > rv[a] + RSI_DIV_MARGIN and rv[b] < 50):
+                bull_at = b
+        if len(swing_highs) >= 2:
+            a, b = swing_highs[-2], swing_highs[-1]
+            if (not np.isnan(rv[a]) and not np.isnan(rv[b])
+                    and high[b] > high[a] and rv[b] < rv[a] - RSI_DIV_MARGIN and rv[b] > 50):
+                bear_at = b
+        if bull_at >= 0 or bear_at >= 0:
+            out["rsi_divergence"] = "bullish" if bull_at >= bear_at else "bearish"
+
+    # --- MACD-histogram run: trailing count of same-direction steps. ---
+    if "macd_hist" in tail:
+        hist = tail["macd_hist"].to_numpy(dtype=float)
+        streak, direction = 0, 0
+        for d in np.diff(hist)[::-1]:
+            if np.isnan(d) or d == 0:
+                break
+            s = 1 if d > 0 else -1
+            if direction == 0:
+                direction = s
+            if s != direction:
+                break
+            streak += 1
+        if streak >= 2 and direction:
+            out["macd_hist_dir"] = "rising" if direction > 0 else "falling"
+            out["macd_hist_streak"] = streak
+            if not np.isnan(hist[-1]):
+                out["macd_hist_below_zero"] = bool(hist[-1] < 0)
+
+    # --- Volume climax: a recent spike on a wide bar pinned to the extreme. ---
+    if "vol_ma" in tail:
+        vol = tail["volume"].to_numpy(dtype=float)
+        vma = tail["vol_ma"].to_numpy(dtype=float)
+        win_low, win_high = float(low.min()), float(high.max())
+        rng = win_high - win_low
+        for j in range(m - 1, max(m - 1 - CLIMAX_LOOKBACK, -1), -1):
+            if np.isnan(vol[j]) or np.isnan(vma[j]) or vma[j] <= 0 or vol[j] < VOL_CLIMAX_MULT * vma[j]:
+                continue
+            bar_rng = high[j] - low[j]
+            if bar_rng <= 0 or rng <= 0:
+                continue
+            close_pos = (close[j] - low[j]) / bar_rng          # 0 = closed at low, 1 = at high
+            near_low = (low[j] - win_low) / rng <= 0.15
+            near_high = (win_high - high[j]) / rng <= 0.15
+            if near_low and close_pos <= 0.5:
+                out["volume_climax"] = "selling"
+                out["volume_climax_bars_ago"] = m - 1 - j
+                break
+            if near_high and close_pos >= 0.5:
+                out["volume_climax"] = "buying"
+                out["volume_climax_bars_ago"] = m - 1 - j
+                break
+
+    return out
+
+
 # ---- serialization helpers ------------------------------------------------
 
 def _points(times: pd.Series, series: pd.Series) -> list[dict]:
@@ -302,6 +428,7 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
     #     (warm-up included), so basing near a long-held support is visible. ---
     if price is not None:
         snap.update(support_resistance(df_ind, price))
+        snap.update(reversal_signals(df_ind, price))
 
     signals: list[str] = []
     cmf_v = snap.get("cmf")
@@ -337,6 +464,16 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
         signals.append(f"Testing support (held {snap['support_touches']}x)")
     elif res_d is not None and res_d <= 3.0 and (snap.get("resistance_touches") or 0) >= 2:
         signals.append(f"Capped at resistance (rejected {snap['resistance_touches']}x)")
+    if snap.get("rsi_divergence") == "bullish":
+        signals.append("Bullish RSI divergence")
+    elif snap.get("rsi_divergence") == "bearish":
+        signals.append("Bearish RSI divergence")
+    if snap.get("volume_climax") == "selling":
+        signals.append("Selling climax (volume)")
+    elif snap.get("volume_climax") == "buying":
+        signals.append("Buying climax (volume)")
+    if (snap.get("macd_hist_streak") or 0) >= 3:
+        signals.append(f"MACD histogram {snap['macd_hist_dir']} {snap['macd_hist_streak']} bars")
     snap["signals"] = signals
 
     first_close = df_ind.iloc[0]["close"]

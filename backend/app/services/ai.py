@@ -69,6 +69,11 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     recent_chg = snapshot.get("recent_change_pct")
     vol_contraction = snapshot.get("vol_contraction")
     price_pos = snapshot.get("price_position")
+    rsi_div = snapshot.get("rsi_divergence")
+    hist_dir = snapshot.get("macd_hist_dir")
+    hist_streak = snapshot.get("macd_hist_streak") or 0
+    hist_below_zero = snapshot.get("macd_hist_below_zero")
+    climax = snapshot.get("volume_climax")
 
     # --- Trend regime (medium term): the dominant, but laggy, signal. Scaled by
     #     how far the EMAs have separated — a fresh, barely-crossed regime is far
@@ -222,6 +227,38 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
                   "(negative CMF/OBV) — topping risk")
         risks.append("Distribution can persist; wait for a break below support to confirm.")
 
+    # --- Multi-candle reversal & exhaustion ------------------------------
+    # Unlike the single-bar reads above, these span a sequence of candles, so
+    # they can lean against the laggy trend right at a turn — exactly where a
+    # pure trend-follower is blindest and most likely to sell the bottom or
+    # chase the top.
+
+    # RSI divergence: a fresh price extreme the oscillator refuses to confirm.
+    if rsi_div == "bullish":
+        add(1.5, "Bullish RSI divergence (price lower low, RSI higher low) — momentum reversal up")
+    elif rsi_div == "bearish":
+        add(-1.5, "Bearish RSI divergence (price higher high, RSI lower high) — momentum reversal down")
+        risks.append("Bearish divergence flags momentum exhaustion under the high.")
+
+    # MACD-histogram run: a multi-bar turn ahead of the signal-line crossover.
+    # Worth most as an *early* tell — a histogram rising while still below zero
+    # is the first sign a downtrend's momentum is fading (mirror above zero).
+    if hist_streak >= 3 and hist_dir:
+        w = min(0.8, 0.2 * hist_streak)
+        if hist_dir == "rising":
+            add(w, f"MACD histogram rising {hist_streak} bars "
+                   + ("(downside momentum fading)" if hist_below_zero else "(upside momentum building)"))
+        else:
+            add(-w, f"MACD histogram falling {hist_streak} bars "
+                    + ("(downside momentum building)" if hist_below_zero else "(upside momentum fading)"))
+
+    # Volume climax: a spike on a wide bar pinned to the window's extreme.
+    if climax == "selling":
+        add(1.0, "Selling climax: volume spike at the lows — capitulation / bottoming")
+    elif climax == "buying":
+        add(-1.0, "Buying climax: volume spike at the highs — blow-off / topping")
+        risks.append("Buying climax can mark a local top; chasing strength here is poor risk/reward.")
+
     score = sum(w for w, _ in contrib)
     gross = sum(abs(w) for w, _ in contrib)
     agreement = abs(score) / gross if gross else 0.0  # 1 = unanimous, 0 = balanced
@@ -254,9 +291,10 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     summary = f"Rule-based signal: {action.replace('_', ' ').upper()} (score {score:+.1f})."
     rationale = (
         "Weighs EMA trend regime, price-vs-mean, MACD momentum, RSI, Bollinger"
-        " position, volume, Chaikin money flow, swing support/resistance and an"
-        " accumulation/distribution read into a single score; mean-reversion only"
-        " at RSI/band extremes or established support/resistance."
+        " position, volume, Chaikin money flow, swing support/resistance, an"
+        " accumulation/distribution read and multi-candle reversal signals (RSI"
+        " divergence, MACD-histogram turns, volume climaxes) into a single score;"
+        " mean-reversion only at RSI/band extremes or established support/resistance."
         + chg_txt
         + news_txt
         + " Set OPENAI_API_KEY to enable news-aware AI analysis."
