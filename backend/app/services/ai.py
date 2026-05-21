@@ -75,6 +75,32 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     hist_below_zero = snapshot.get("macd_hist_below_zero")
     climax = snapshot.get("volume_climax")
 
+    # --- Structural context, computed up front so support/resistance scoring can
+    #     reconcile with it. A nearby "resistance" inside an accumulation base is
+    #     the range ceiling price is coiling under, not overhead supply far above
+    #     — scoring it as a full bearish cap double-counts against the basing read
+    #     and (when the symmetric support guard is just out of range) can be the
+    #     single contributor that tips a SELL into a STRONG SELL. Mirror for a
+    #     support level under active distribution. ---
+    ref = ema50 if ema50 is not None else ema20
+    above_mean = price is not None and ref is not None and price > ref
+    below_mean = price is not None and ref is not None and price < ref
+    downtrend = ema50 is not None and ema200 is not None and ema50 < ema200
+    uptrend = ema50 is not None and ema200 is not None and ema50 > ema200
+    consolidating = (
+        (vol_contraction is not None and vol_contraction < 0.9)  # volatility contracting
+        or (recent_chg is not None and abs(recent_chg) < 6.0)    # price gone flat
+    )
+    inflow = (cmf is not None and cmf > 0.03) or (obv_trend is not None and obv_trend > 0.05)
+    outflow = (cmf is not None and cmf < -0.03) or (obv_trend is not None and obv_trend < -0.05)
+    not_freefall = recent_chg is None or recent_chg > -12.0  # still falling hard ≠ basing
+    not_blowoff = recent_chg is None or recent_chg < 12.0
+    accumulation = (downtrend or below_mean) and consolidating and inflow and not_freefall
+    distribution = (
+        (uptrend or above_mean) and consolidating and outflow and not_blowoff
+        and (price_pos is None or price_pos > 0.5)
+    )
+
     # --- Trend regime (medium term): the dominant, but laggy, signal. Scaled by
     #     how far the EMAs have separated — a fresh, barely-crossed regime is far
     #     weaker evidence than a wide, established one. Ties stay neutral. ---
@@ -88,7 +114,6 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     # --- Price vs its mid-term mean: a faster read than EMA200, so we use
     #     EMA50/EMA20 here instead of double-counting the laggy EMA200. Scaled by
     #     % distance: price sitting right on the mean is near-neutral. ---
-    ref = ema50 if ema50 is not None else ema20
     if price is not None and ref:
         dist_pct = (price - ref) / ref * 100
         w = scaled(dist_pct, full_at=3.0, weight=1.0)
@@ -145,32 +170,24 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         prox = 1.0 - sup_dist / 4.0                     # 1 at the level → 0 by 4% above
         strength = min(1.0, 0.4 + 0.2 * sup_touches)    # more touches → firmer level
         w = round(2.0 * prox * strength, 2)             # up to +2.0 right on strong support
+        if distribution:
+            # price stalling near a level it's distributing from — the floor is
+            # giving way, not holding; don't let it manufacture a strong-buy.
+            w = round(w * 0.4, 2)
         if w >= 0.05:
             add(w, f"Testing support ~{support:g} (held {sup_touches}x) — "
                    "limited downside, bounce setup")
-            nxt = snapshot.get("support_next")
-            if nxt:
-                drop = (support - nxt) / support * 100
-                risks.append(f"A decisive close below {support:g} opens the next "
-                             f"support ~{nxt:g} (~{drop:.1f}% lower).")
-            else:
-                risks.append(f"A decisive close below {support:g} voids the support "
-                             "thesis with no clear level beneath.")
     if resistance and res_dist is not None and 0 <= res_dist <= 4.0 and res_touches >= 2:
         prox = 1.0 - res_dist / 4.0
         strength = min(1.0, 0.4 + 0.2 * res_touches)
         w = round(-2.0 * prox * strength, 2)            # up to -2.0 right under strong resistance
+        if accumulation:
+            # the range ceiling price is coiling under during a base, not true
+            # overhead supply — don't let it deepen a sell into a strong-sell.
+            w = round(w * 0.4, 2)
         if abs(w) >= 0.05:
             add(w, f"Capped at resistance ~{resistance:g} (rejected {res_touches}x) — "
                    "limited upside")
-            nxt = snapshot.get("resistance_next")
-            if nxt:
-                rise = (nxt - resistance) / resistance * 100
-                risks.append(f"A breakout above {resistance:g} opens the next "
-                             f"resistance ~{nxt:g} (~{rise:.1f}% higher).")
-            else:
-                risks.append(f"A breakout above {resistance:g} clears overhead "
-                             "resistance with open air above.")
 
     # --- Recent realised drift (last ~20 bars): the live momentum, distinct
     #     from the laggy EMA regime. The full-window change is kept only for the
@@ -191,8 +208,6 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
 
     # --- Volume confirmation: a move backed by above-average volume is more
     #     trustworthy than one drifting on thin volume. ---
-    above_mean = price is not None and ref is not None and price > ref
-    below_mean = price is not None and ref is not None and price < ref
     if volume is not None and vol_ma and volume >= 1.2 * vol_ma and drift is not None:
         if drift > 0 and above_mean:
             add(0.5, "Above-average volume confirms the advance")
@@ -205,24 +220,13 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     # flowing in (rising OBV / positive CMF). Caught before the lagging EMAs and
     # MACD turn, it counters the trend-follower's habit of selling the bottom.
     # Distribution is the mirror: stalling near highs while money flows out.
-    downtrend = ema50 is not None and ema200 is not None and ema50 < ema200
-    uptrend = ema50 is not None and ema200 is not None and ema50 > ema200
-    consolidating = (
-        (vol_contraction is not None and vol_contraction < 0.9)  # volatility contracting
-        or (recent_chg is not None and abs(recent_chg) < 6.0)    # price gone flat
-    )
-    inflow = (cmf is not None and cmf > 0.03) or (obv_trend is not None and obv_trend > 0.05)
-    outflow = (cmf is not None and cmf < -0.03) or (obv_trend is not None and obv_trend < -0.05)
-    not_freefall = recent_chg is None or recent_chg > -12.0  # still falling hard ≠ basing
-    not_blowoff = recent_chg is None or recent_chg < 12.0
-
-    if (downtrend or below_mean) and consolidating and inflow and not_freefall:
+    # (The `accumulation` / `distribution` flags are computed up top so the
+    # support/resistance block above could already reconcile against them.)
+    if accumulation:
         add(1.5, "Accumulation: basing after a decline with money flowing in "
                  "(positive CMF/OBV) — potential bottoming")
         risks.append("Accumulation is provisional until price reclaims EMA50; trend is still down.")
-    elif (uptrend or above_mean) and consolidating and outflow and not_blowoff and (
-        price_pos is None or price_pos > 0.5
-    ):
+    elif distribution:
         add(-1.5, "Distribution: stalling near highs with money flowing out "
                   "(negative CMF/OBV) — topping risk")
         risks.append("Distribution can persist; wait for a break below support to confirm.")
@@ -273,6 +277,23 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         action = "sell"
     else:
         action = "hold"
+
+    # --- Structural demotion guard: never issue a *strong* call straight into an
+    #     active opposing structural read. A selling climax / bullish divergence /
+    #     accumulation base says "this may be the bottom" — so a STRONG SELL there
+    #     is the trend-follower's classic mistake (and the mirror at the top). The
+    #     score already counts these as positive contributors; this caps the rare
+    #     case where the trend/momentum stack still nets past the strong threshold.
+    bottoming = accumulation or climax == "selling" or rsi_div == "bullish"
+    topping = distribution or climax == "buying" or rsi_div == "bearish"
+    if action == "strong_sell" and bottoming:
+        action = "sell"
+        risks.append("Demoted from STRONG SELL: an opposing bottoming signal "
+                     "(accumulation / capitulation / bullish divergence) is active.")
+    elif action == "strong_buy" and topping:
+        action = "buy"
+        risks.append("Demoted from STRONG BUY: an opposing topping signal "
+                     "(distribution / blow-off / bearish divergence) is active.")
 
     # Conviction scales with both signal magnitude and how much they agree.
     conf = (50.0 + 8.0 * abs(score)) * (0.6 + 0.4 * agreement)
