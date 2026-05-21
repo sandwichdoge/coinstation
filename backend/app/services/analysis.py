@@ -95,6 +95,29 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         and (price_pos is None or price_pos > 0.5)
     )
 
+    # --- Overextension / blow-off: the mirror of accumulation, and the engine's
+    #     explicit "don't chase the top" guard. A trend-follower is structurally
+    #     blind here — the price-vs-mean term below saturates a few % above the
+    #     mean, so a parabolic move 40% above EMA50 scores the same bullish +1 as
+    #     a healthy uptrend. We measure that stretch directly: how far price has
+    #     run above its mean (`ext_pct`) and whether the recent move is parabolic.
+    #     A blow-off pins price near the top of its range while RSI is overbought.
+    ext_pct = (price - ref) / ref * 100 if (price is not None and ref) else None
+    overextended = ext_pct is not None and ext_pct >= 15.0
+    parabolic = recent_chg is not None and recent_chg >= 25.0
+    pinned_high = price_pos is None or price_pos >= 0.6
+    # A stretched, parabolic advance is the *setup*; we only call it a blow-off
+    # once momentum actually rolls over — otherwise this fires on every overbought
+    # bar of a healthy run and bails the whole trend. The rollover tell is a
+    # bearish RSI divergence, a sustained MACD-histogram down-turn, or a buying
+    # climax: the same exhaustion reads the snapshot already computes.
+    rolling_over = (
+        rsi_div == "bearish"
+        or (hist_dir == "falling" and hist_streak >= 2)
+        or climax == "buying"
+    )
+    blowoff = (uptrend or above_mean) and (overextended or parabolic) and pinned_high and rolling_over
+
     # --- Trend regime (medium term): the dominant, but laggy, signal. Scaled by
     #     how far the EMAs have separated — a fresh, barely-crossed regime is far
     #     weaker evidence than a wide, established one. Ties stay neutral. ---
@@ -115,6 +138,20 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
             add(w, "Price holding above EMA50 (near-term strength)" if w > 0
                 else "Price below EMA50 (near-term weakness)")
 
+    # --- Overextension: once price has stretched well past its mean *and* sits
+    #     near the top of its range, each extra percent is mean-reversion risk,
+    #     not strength — it counters the saturation of the term above so a spike
+    #     no longer reads as plain bullish. Kept deliberately light (caps at -1.0,
+    #     grows from +15% to +40% above the mean) and gated on `pinned_high`: it
+    #     tempers chasing a vertical move, but won't flip a healthy uptrend short
+    #     on its own. The full topping read is the rollover-confirmed blow-off
+    #     below; this is just the "don't chase the spike" tap on the brakes. ---
+    if ext_pct is not None and ext_pct >= 15.0 and pinned_high:
+        w = round(-1.0 * min(1.0, (ext_pct - 15.0) / 25.0), 2)
+        if w <= -0.05:
+            add(w, f"Price ~{ext_pct:.0f}% above EMA50 (overextended, mean-reversion risk)")
+            risks.append("Price is stretched far above its mean; chasing here is poor risk/reward.")
+
     # --- Momentum: histogram direction + MACD zero-line context.
     #     A flat (zero) histogram or MACD is momentumless, not bearish. ---
     if hist is not None and price:
@@ -134,7 +171,12 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         if rsi <= 30:
             add(2.0, f"RSI {rsi:.0f} oversold (bullish reversal potential)")
         elif rsi >= 70:
-            add(-1.0, f"RSI {rsi:.0f} overbought (pullback risk)")
+            # Scale gently with how stretched it is: -1.0 at 70 ramping to -1.6 by
+            # 82. Overbought can persist in strong trends, so this stays modest —
+            # but an extreme print is real exhaustion and was previously flat at
+            # -1.0, under-weighted versus the +2.0 oversold mirror.
+            w = round(-(1.0 + 0.6 * min(1.0, (rsi - 70.0) / 12.0)), 2)
+            add(w, f"RSI {rsi:.0f} overbought (pullback risk)")
             risks.append("Overbought RSI can persist in strong trends")
         elif rsi >= 55:
             add(0.5, f"RSI {rsi:.0f} firm (momentum with trend)")
@@ -224,6 +266,13 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         add(-1.5, "Distribution: stalling near highs with money flowing out "
                   "(negative CMF/OBV) — topping risk")
         risks.append("Distribution can persist; wait for a break below support to confirm.")
+    elif blowoff:
+        # Mirror of accumulation: a parabolic, overbought run pinned to the highs.
+        # Distribution catches the *quiet* top (sideways stall); this catches the
+        # *loud* one (vertical blow-off), which the trend stack otherwise chases.
+        add(-2.0, "Blow-off: overbought, overextended run pinned to the highs "
+                  "— exhaustion / topping risk")
+        risks.append("Blow-off tops reverse sharply; a parabolic advance is not a place to add.")
 
     # --- Multi-candle reversal & exhaustion ------------------------------
     # Unlike the single-bar reads above, these span a sequence of candles, so
@@ -279,7 +328,7 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     #     score already counts these as positive contributors; this caps the rare
     #     case where the trend/momentum stack still nets past the strong threshold.
     bottoming = accumulation or climax == "selling" or rsi_div == "bullish"
-    topping = distribution or climax == "buying" or rsi_div == "bearish"
+    topping = distribution or blowoff or climax == "buying" or rsi_div == "bearish"
     if action == "strong_sell" and bottoming:
         action = "sell"
         risks.append("Demoted from STRONG SELL: an opposing bottoming signal "
