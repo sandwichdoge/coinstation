@@ -195,6 +195,9 @@ REVERSAL_WINDOW = 2 * RECENT_WINDOW  # bars scanned for divergences / swings
 RSI_DIV_MARGIN = 2.0                 # min RSI gap (points) for a real divergence
 VOL_CLIMAX_MULT = 2.0                # volume >= this * MA to count as a climax bar
 CLIMAX_LOOKBACK = 6                  # only a recent spike is an actionable climax
+WICK_DOMINANCE = 2.0                 # rejection wick must be >= this * the candle body
+WICK_RANGE_FRAC = 0.5                # ... and span >= this fraction of the candle's range
+EXTREME_TOL = 0.15                   # within this fraction of the window range counts as "at the extreme"
 
 
 def reversal_signals(df_ind: pd.DataFrame, price: float, wing: int = PIVOT_WING,
@@ -223,6 +226,8 @@ def reversal_signals(df_ind: pd.DataFrame, price: float, wing: int = PIVOT_WING,
     high = tail["high"].to_numpy(dtype=float)
     close = tail["close"].to_numpy(dtype=float)
     m = len(tail)
+    win_low, win_high = float(low.min()), float(high.max())
+    rng = win_high - win_low  # window's full range, the yardstick for "at the extreme"
 
     swing_lows: list[int] = []
     swing_highs: list[int] = []
@@ -289,20 +294,18 @@ def reversal_signals(df_ind: pd.DataFrame, price: float, wing: int = PIVOT_WING,
                 out["macd_hist_below_zero"] = bool(hist[-1] < 0)
 
     # --- Volume climax: a recent spike on a wide bar pinned to the extreme. ---
-    if "vol_ma" in tail:
+    if "vol_ma" in tail and rng > 0:
         vol = tail["volume"].to_numpy(dtype=float)
         vma = tail["vol_ma"].to_numpy(dtype=float)
-        win_low, win_high = float(low.min()), float(high.max())
-        rng = win_high - win_low
         for j in range(m - 1, max(m - 1 - CLIMAX_LOOKBACK, -1), -1):
             if np.isnan(vol[j]) or np.isnan(vma[j]) or vma[j] <= 0 or vol[j] < VOL_CLIMAX_MULT * vma[j]:
                 continue
             bar_rng = high[j] - low[j]
-            if bar_rng <= 0 or rng <= 0:
+            if bar_rng <= 0:
                 continue
             close_pos = (close[j] - low[j]) / bar_rng          # 0 = closed at low, 1 = at high
-            near_low = (low[j] - win_low) / rng <= 0.15
-            near_high = (win_high - high[j]) / rng <= 0.15
+            near_low = (low[j] - win_low) / rng <= EXTREME_TOL
+            near_high = (win_high - high[j]) / rng <= EXTREME_TOL
             if near_low and close_pos <= 0.5:
                 out["volume_climax"] = "selling"
                 out["volume_climax_bars_ago"] = m - 1 - j
@@ -310,6 +313,40 @@ def reversal_signals(df_ind: pd.DataFrame, price: float, wing: int = PIVOT_WING,
             if near_high and close_pos >= 0.5:
                 out["volume_climax"] = "buying"
                 out["volume_climax_bars_ago"] = m - 1 - j
+                break
+
+    # --- Rejection wick (pin bar): a recent candle that tags the window extreme
+    #     then closes back away from it on a long shadow — buyers (or sellers)
+    #     rejecting the probe. The candle-anatomy partner to the volume climax
+    #     above, and the read the close-only scoring is otherwise blind to. A
+    #     long lower shadow at the lows is demand defending the level (bullish);
+    #     a long upper shadow at the highs is supply defending it (bearish). ---
+    if "open" in tail and rng > 0:
+        op = tail["open"].to_numpy(dtype=float)
+        for j in range(m - 1, max(m - 1 - CLIMAX_LOOKBACK, -1), -1):
+            o, c, h, l = op[j], close[j], high[j], low[j]
+            if any(np.isnan(x) for x in (o, c, h, l)):
+                continue
+            bar_rng = h - l
+            if bar_rng <= 0:
+                continue
+            body = abs(c - o)
+            upper_wick = h - max(o, c)
+            lower_wick = min(o, c) - l
+            near_low = (l - win_low) / rng <= EXTREME_TOL
+            near_high = (win_high - h) / rng <= EXTREME_TOL
+            # A long shadow relative to both the body and the bar's own range.
+            bull = (near_low and lower_wick >= WICK_DOMINANCE * body
+                    and lower_wick >= WICK_RANGE_FRAC * bar_rng)
+            bear = (near_high and upper_wick >= WICK_DOMINANCE * body
+                    and upper_wick >= WICK_RANGE_FRAC * bar_rng)
+            if bull and not bear:
+                out["wick_rejection"] = "bullish"
+                out["wick_rejection_bars_ago"] = m - 1 - j
+                break
+            if bear and not bull:
+                out["wick_rejection"] = "bearish"
+                out["wick_rejection_bars_ago"] = m - 1 - j
                 break
 
     return out
@@ -472,6 +509,10 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
         signals.append("Selling climax (volume)")
     elif snap.get("volume_climax") == "buying":
         signals.append("Buying climax (volume)")
+    if snap.get("wick_rejection") == "bullish":
+        signals.append("Bullish rejection wick")
+    elif snap.get("wick_rejection") == "bearish":
+        signals.append("Bearish rejection wick")
     if (snap.get("macd_hist_streak") or 0) >= 3:
         signals.append(f"MACD histogram {snap['macd_hist_dir']} {snap['macd_hist_streak']} bars")
     snap["signals"] = signals

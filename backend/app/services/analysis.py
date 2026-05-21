@@ -68,6 +68,7 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     hist_streak = snapshot.get("macd_hist_streak") or 0
     hist_below_zero = snapshot.get("macd_hist_below_zero")
     climax = snapshot.get("volume_climax")
+    wick = snapshot.get("wick_rejection")
 
     # --- Structural context, computed up front so support/resistance scoring can
     #     reconcile with it. A nearby "resistance" inside an accumulation base is
@@ -202,6 +203,20 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     resistance, res_dist = snapshot.get("resistance"), snapshot.get("resistance_dist_pct")
     res_touches = snapshot.get("resistance_touches") or 0
 
+    # A level only binds the move if price is actually near it. When price is
+    # stretched to the *opposite* band/extreme, the level on the far side is not
+    # the active constraint — capping a stretched-low price for "limited upside"
+    # (or a stretched-high one for "limited downside") double-penalises the very
+    # mean-reversion the band stretch is flagging, so we damp that term.
+    stretched_low = (
+        (bb_lower is not None and price is not None and price <= bb_lower)
+        or (price_pos is not None and price_pos <= 0.2)
+    )
+    stretched_high = (
+        (bb_upper is not None and price is not None and price >= bb_upper)
+        or (price_pos is not None and price_pos >= 0.8)
+    )
+
     if support and sup_dist is not None and 0 <= sup_dist <= 4.0 and sup_touches >= 2:
         prox = 1.0 - sup_dist / 4.0                     # 1 at the level → 0 by 4% above
         strength = min(1.0, 0.4 + 0.2 * sup_touches)    # more touches → firmer level
@@ -210,6 +225,8 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
             # price stalling near a level it's distributing from — the floor is
             # giving way, not holding; don't let it manufacture a strong-buy.
             w = round(w * 0.4, 2)
+        if stretched_high:
+            w = round(w * 0.5, 2)  # price is pinned to the highs, far from this floor
         if w >= 0.05:
             add(w, f"Testing support ~{support:g} (held {sup_touches}x) — "
                    "limited downside, bounce setup")
@@ -221,6 +238,8 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
             # the range ceiling price is coiling under during a base, not true
             # overhead supply — don't let it deepen a sell into a strong-sell.
             w = round(w * 0.4, 2)
+        if stretched_low:
+            w = round(w * 0.5, 2)  # price is pinned to the lows, far from this ceiling
         if abs(w) >= 0.05:
             add(w, f"Capped at resistance ~{resistance:g} (rejected {res_touches}x) — "
                    "limited upside")
@@ -292,12 +311,32 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     # is the first sign a downtrend's momentum is fading (mirror above zero).
     if hist_streak >= 3 and hist_dir:
         w = min(0.8, 0.2 * hist_streak)
+        # A streak this long that has also driven price to the matching range
+        # extreme is late-stage, not fresh: downside momentum "building" for 8+
+        # bars into the lows is the kind of one-way run that mean-reverts. There
+        # we flip the trend-aligned read to a light exhaustion tap rather than
+        # pile on. (The counter-trend branches — a histogram turning up while
+        # still below zero, or down while above it — are already early-reversal
+        # tells, so they keep their weight regardless of maturity.)
+        mature = hist_streak >= 8
+        at_low = price_pos is not None and price_pos <= 0.25
+        at_high = price_pos is not None and price_pos >= 0.75
         if hist_dir == "rising":
-            add(w, f"MACD histogram rising {hist_streak} bars "
-                   + ("(downside momentum fading)" if hist_below_zero else "(upside momentum building)"))
+            if hist_below_zero:
+                add(w, f"MACD histogram rising {hist_streak} bars (downside momentum fading)")
+            elif mature and at_high:
+                add(-0.5, f"MACD histogram rising {hist_streak} bars but pinned to the highs "
+                          "— upside exhaustion, not fresh momentum")
+            else:
+                add(w, f"MACD histogram rising {hist_streak} bars (upside momentum building)")
         else:
-            add(-w, f"MACD histogram falling {hist_streak} bars "
-                    + ("(downside momentum building)" if hist_below_zero else "(upside momentum fading)"))
+            if not hist_below_zero:
+                add(-w, f"MACD histogram falling {hist_streak} bars (upside momentum fading)")
+            elif mature and at_low:
+                add(0.5, f"MACD histogram falling {hist_streak} bars but pinned to the lows "
+                         "— downside exhaustion, not fresh momentum")
+            else:
+                add(-w, f"MACD histogram falling {hist_streak} bars (downside momentum building)")
 
     # Volume climax: a spike on a wide bar pinned to the window's extreme.
     if climax == "selling":
@@ -305,6 +344,16 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     elif climax == "buying":
         add(-1.0, "Buying climax: volume spike at the highs — blow-off / topping")
         risks.append("Buying climax can mark a local top; chasing strength here is poor risk/reward.")
+
+    # Rejection wick (pin bar): candle anatomy the close-only terms above are
+    # blind to. A long lower shadow tagging the lows then closing away is demand
+    # defending the level; a long upper shadow at the highs is supply doing the
+    # same. Read as a single-bar reversal tell with the trend-stack's blind spot.
+    if wick == "bullish":
+        add(1.0, "Bullish rejection wick (long lower shadow at the lows) — buyers defending the level")
+    elif wick == "bearish":
+        add(-1.0, "Bearish rejection wick (long upper shadow at the highs) — sellers defending the level")
+        risks.append("Upper-shadow rejection flags supply overhead.")
 
     score = sum(w for w, _ in contrib)
     gross = sum(abs(w) for w, _ in contrib)
@@ -327,8 +376,8 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     #     is the trend-follower's classic mistake (and the mirror at the top). The
     #     score already counts these as positive contributors; this caps the rare
     #     case where the trend/momentum stack still nets past the strong threshold.
-    bottoming = accumulation or climax == "selling" or rsi_div == "bullish"
-    topping = distribution or blowoff or climax == "buying" or rsi_div == "bearish"
+    bottoming = accumulation or climax == "selling" or rsi_div == "bullish" or wick == "bullish"
+    topping = distribution or blowoff or climax == "buying" or rsi_div == "bearish" or wick == "bearish"
     if action == "strong_sell" and bottoming:
         action = "sell"
         risks.append("Demoted from STRONG SELL: an opposing bottoming signal "
@@ -356,8 +405,9 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     rationale = (
         "Weighs EMA trend regime, price-vs-mean, MACD momentum, RSI, Bollinger"
         " position, volume, Chaikin money flow, swing support/resistance, an"
-        " accumulation/distribution read and multi-candle reversal signals (RSI"
-        " divergence, MACD-histogram turns, volume climaxes) into a single score;"
+        " accumulation/distribution read and candle/reversal signals (RSI"
+        " divergence, MACD-histogram turns, volume climaxes, rejection wicks) into"
+        " a single score;"
         " mean-reversion only at RSI/band extremes or established support/resistance."
         + chg_txt
         + news_txt
