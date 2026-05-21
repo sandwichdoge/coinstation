@@ -1,0 +1,27 @@
+# CoinStation — backend (FastAPI) + frontend (nginx-served React).
+#   docker compose up --build
+#   frontend  -> http://localhost:8080
+#   backend   -> http://localhost:8000/api/health
+#
+# To enable OpenAI analysis, export OPENAI_API_KEY before running (optional;
+# without it the app uses the rule-based fallback).
+
+services:
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: sqlite:////app/data/coinstation.db
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      CORS_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
+    volumes:
+      - ./data:/app/data        # persists the SQLite news archive
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
