@@ -61,6 +61,7 @@ POPULAR_SYMBOLS: list[dict[str, str]] = [
     {"symbol": "ICPUSDT", "base": "ICP", "name": "Internet Computer"},
     {"symbol": "AAVEUSDT", "base": "AAVE", "name": "Aave"},
     {"symbol": "BCHUSDT", "base": "BCH", "name": "Bitcoin Cash"},
+    {"symbol": "ZECUSDT", "base": "ZEC", "name": "Zcash"},
 ]
 
 OHLCV_COLUMNS = ["time", "open", "high", "low", "close", "volume"]

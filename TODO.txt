@@ -1,0 +1,5 @@
+- Fix run.sh script
+- Add more news sites
+- Entry Finder feature:
+ + Compare to BTC's movement - strength in relative to global crypto's sentiment (moves weakly compared to how much BTC moved in the same candle, etc.)
+ + Rule-based analysis should take into account bigger and smaller timeframes as well => Add a "final verdict"
