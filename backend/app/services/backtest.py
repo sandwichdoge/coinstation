@@ -3,7 +3,7 @@
 Pulls warm-up history before `start` so indicators are valid from the first
 traded bar, then simulates a long/flat (spot) strategy bar by bar and compares
 it to buy & hold. The `ai` strategy calls the same `ai.analyze` used live, with
-`as_of` set to each bar's timestamp and news limited to items published by then.
+`as_of` set to each bar's timestamp; backtests run on technicals only (no news).
 """
 from __future__ import annotations
 
@@ -11,12 +11,10 @@ import math
 
 import numpy as np
 import pandas as pd
-from sqlalchemy.orm import Session
 
 from ..schemas import BacktestRequest
 from ..timeutil import ms_to_iso, now_ms, to_ms
 from . import ai, indicators, market_data
-from . import news as news_svc
 
 YEAR_MS = 365.25 * 24 * 3600 * 1000
 
@@ -29,7 +27,6 @@ async def _signal(
     ind: pd.DataFrame,
     idx: int,
     j: int,
-    db: Session | None,
 ) -> str:
     """Return 'buy' | 'sell' | 'hold' for the current bar given the position."""
     strat = req.strategy
@@ -73,13 +70,9 @@ async def _signal(
             return "hold"
         snapshot = indicators.latest_snapshot(ind.iloc[: idx + 1])
         as_of_ms = int(row["time"]) * 1000
-        headlines = []
-        if db is not None:
-            items = news_svc.get_news(db, symbol=req.symbol, before_ms=as_of_ms, limit=10)
-            headlines = [news_svc.to_dict(i) for i in items]
         result = await ai.analyze(
             symbol=req.symbol, interval=req.interval, as_of_ms=as_of_ms,
-            snapshot=snapshot, headlines=headlines,
+            snapshot=snapshot, headlines=[],
         )
         if (
             position == 0
@@ -127,7 +120,7 @@ def _metrics(equity: list[float], bh: list[float], round_trips: list[float], ste
     }
 
 
-async def run_backtest(req: BacktestRequest, db: Session | None = None) -> dict:
+async def run_backtest(req: BacktestRequest) -> dict:
     start_ms = to_ms(req.start)
     end_ms = to_ms(req.end) or now_ms()
     if start_ms is None:
@@ -170,7 +163,7 @@ async def run_backtest(req: BacktestRequest, db: Session | None = None) -> dict:
         price = float(row["close"])
         t = int(row["time"])
 
-        action = await _signal(req, position, row, prev, ind, offset + j, j, db)
+        action = await _signal(req, position, row, prev, ind, offset + j, j)
 
         if action == "buy" and position == 0:
             units = cash * (1 - fee) / price

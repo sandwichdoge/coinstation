@@ -49,6 +49,26 @@ def bollinger(
     return mid + num_std * std, mid, mid - num_std * std
 
 
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume: running total of volume signed by the bar's direction.
+    Rising OBV while price is flat/falling is the classic accumulation tell."""
+    direction = np.sign(close.diff().fillna(0.0))
+    return (direction * volume).cumsum()
+
+
+def chaikin_money_flow(
+    high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, period: int = 20
+) -> pd.Series:
+    """Chaikin Money Flow: volume weighted by where each close lands within its
+    bar's range, summed over `period`. Positive = buying pressure (closes near
+    highs); negative = selling pressure. Bounded roughly to [-1, 1]."""
+    rng = (high - low).replace(0.0, np.nan)
+    mfm = ((close - low) - (high - close)) / rng  # money-flow multiplier ∈ [-1, 1]
+    mfv = (mfm * volume).fillna(0.0)              # flat-bar (high==low) contributes 0
+    vol_sum = volume.rolling(window=period, min_periods=period).sum().replace(0.0, np.nan)
+    return mfv.rolling(window=period, min_periods=period).sum() / vol_sum
+
+
 # ---- combined frame -------------------------------------------------------
 
 EMA_PERIODS = (20, 50, 200)
@@ -56,6 +76,8 @@ RSI_PERIOD = 14
 MACD_PARAMS = (12, 26, 9)
 BB_PARAMS = (20, 2.0)
 VOL_MA_PERIOD = 20
+CMF_PERIOD = 20
+RECENT_WINDOW = 20  # bars of recent context for drift / basing / money-flow reads
 
 # Candles of warm-up to fetch before a window so EMA200 etc. are valid at start.
 WARMUP_BARS = 250
@@ -73,6 +95,8 @@ def compute_indicator_frame(df: pd.DataFrame) -> pd.DataFrame:
     out["macd"], out["macd_signal"], out["macd_hist"] = macd(close, *MACD_PARAMS)
     out["bb_upper"], out["bb_mid"], out["bb_lower"] = bollinger(close, *BB_PARAMS)
     out["vol_ma"] = sma(out["volume"], VOL_MA_PERIOD)
+    out["obv"] = obv(close, out["volume"])
+    out["cmf"] = chaikin_money_flow(out["high"], out["low"], close, out["volume"], CMF_PERIOD)
     return out
 
 
@@ -153,9 +177,45 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
         "ema200": f(last.get("ema200")),
         "bb_upper": f(last.get("bb_upper")),
         "bb_lower": f(last.get("bb_lower")),
+        "volume": f(last.get("volume")),
+        "vol_ma": f(last.get("vol_ma")),
+        "cmf": f(last.get("cmf")),
     }
 
+    # --- recent-window context: live drift, basing/volatility and net volume
+    #     flow over the last RECENT_WINDOW bars. These feed accumulation /
+    #     distribution detection in the analysis layer. ---
+    n = min(RECENT_WINDOW, len(df_ind) - 1)
+    if n >= 5 and price is not None:
+        tail = df_ind.tail(n + 1)
+        closes = tail["close"].astype(float)
+        first_c = float(closes.iloc[0])
+        if first_c:
+            snap["recent_change_pct"] = round((price - first_c) / first_c * 100, 2)
+        hi, lo = float(tail["high"].max()), float(tail["low"].min())
+        if hi > lo:
+            snap["range_pct"] = round((hi - lo) / price * 100, 2)
+            snap["price_position"] = round((price - lo) / (hi - lo), 3)  # 0 = at low, 1 = at high
+        if "obv" in df_ind:
+            obv_tail = tail["obv"].astype(float)
+            vol_sum = float(tail["volume"].iloc[1:].sum())  # volume backing the OBV moves
+            if vol_sum:
+                # Net OBV change as a fraction of volume traded: +1 = pure inflow, -1 = pure outflow.
+                snap["obv_trend_pct"] = round((float(obv_tail.iloc[-1]) - float(obv_tail.iloc[0])) / vol_sum, 3)
+        rets = closes.pct_change().dropna()
+        if len(rets) >= 6:
+            base_vol = float(rets.std())
+            recent_vol = float(rets.tail(max(3, len(rets) // 3)).std())
+            if base_vol:
+                snap["vol_contraction"] = round(recent_vol / base_vol, 3)  # < 1 = volatility contracting
+
     signals: list[str] = []
+    cmf_v = snap.get("cmf")
+    if cmf_v is not None:
+        if cmf_v >= 0.05:
+            signals.append("Money flow positive (CMF)")
+        elif cmf_v <= -0.05:
+            signals.append("Money flow negative (CMF)")
     if snap["rsi"] is not None:
         if snap["rsi"] >= 70:
             signals.append("RSI overbought (>=70)")
