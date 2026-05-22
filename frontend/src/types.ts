@@ -56,6 +56,10 @@ export interface Snapshot {
   resistance_next_touches?: number;
   signals?: string[];
   window_change_pct?: number;
+  // top/bottom detector (see backend detectors.py)
+  tb_signal?: "bottom" | "top" | null;
+  bottom_score?: number | null;
+  top_score?: number | null;
 }
 
 export interface KlinesResponse {

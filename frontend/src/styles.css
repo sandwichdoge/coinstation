@@ -115,6 +115,11 @@ select:focus, input:focus { border-color: var(--accent); }
 .action-strong_buy, .action-buy { background: var(--green-soft); color: var(--green); }
 .action-hold { background: var(--panel-2); color: var(--muted); }
 .action-sell, .action-strong_sell { background: var(--red-soft); color: var(--red); }
+.tb-flag { display: flex; flex-direction: column; gap: 2px; margin: 10px 0; padding: 8px 12px;
+  border-radius: 8px; font-weight: 700; font-size: 14px; border: 1px solid var(--border); }
+.tb-flag.tb-bottom { background: var(--green-soft); color: var(--green); border-color: var(--green); }
+.tb-flag.tb-top { background: var(--red-soft); color: var(--red); border-color: var(--red); }
+.tb-flag .tb-score { font-weight: 400; font-size: 11px; opacity: 0.85; }
 .conf-wrap { margin: 12px 0; }
 .conf-bar { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin-top: 4px; }
 .conf-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #7ee0ff); }

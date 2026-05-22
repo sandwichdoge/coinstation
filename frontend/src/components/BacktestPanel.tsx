@@ -10,6 +10,7 @@ const STRATEGIES = [
   { id: "rsi", label: "RSI bands" },
   { id: "ema_cross", label: "EMA 50/200 cross" },
   { id: "rules", label: "Rule-based (technicals)" },
+  { id: "top_bottom", label: "Top/Bottom detector" },
   { id: "buy_hold", label: "Buy & Hold" },
 ];
 const BT_INTERVALS = ["1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w"];

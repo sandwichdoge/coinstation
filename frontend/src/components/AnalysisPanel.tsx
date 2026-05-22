@@ -38,6 +38,16 @@ export function AnalysisPanel({ result, loading, error, onAnalyze }: Props) {
             <span className="muted">{result.horizon}</span>
           </div>
 
+          {snap?.tb_signal && (
+            <div className={`tb-flag tb-${snap.tb_signal}`}>
+              {snap.tb_signal === "bottom" ? "▲ Swing bottom detected" : "▼ Swing top detected"}
+              <span className="tb-score">
+                score {fmtNum(snap.tb_signal === "bottom" ? snap.bottom_score : snap.top_score, 1)}
+                {snap.tb_signal === "top" && " · weak side, treat as caution"}
+              </span>
+            </div>
+          )}
+
           <div className="conf-wrap">
             <div className="row" style={{ justifyContent: "space-between" }}>
               <span className="muted">Confidence</span>
