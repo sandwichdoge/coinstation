@@ -14,7 +14,7 @@ import pandas as pd
 
 from ..schemas import BacktestRequest
 from ..timeutil import ms_to_iso, now_ms, to_ms
-from . import analysis, indicators, market_data
+from . import analysis, detectors, indicators, market_data
 
 YEAR_MS = 365.25 * 24 * 3600 * 1000
 
@@ -61,6 +61,18 @@ async def _signal(
         if position == 0 and pe50 <= pe200 and e50 > e200:  # golden cross
             return "buy"
         if position == 1 and pe50 >= pe200 and e50 < e200:  # death cross
+            return "sell"
+        return "hold"
+
+    if strat == "top_bottom":
+        # The detector's discrete signal, precomputed on the full indicator frame
+        # in run_backtest (causal, so the precomputed column equals the bar-by-bar
+        # value — guaranteed by the leakage tripwire test). Long/flat spot: enter
+        # on a confirmed bottom, exit on a confirmed top.
+        sig = int(row.get("tb_signal") or 0)
+        if position == 0 and sig > 0:
+            return "buy"
+        if position == 1 and sig < 0:
             return "sell"
         return "hold"
 
@@ -135,6 +147,12 @@ async def run_backtest(req: BacktestRequest) -> dict:
         raise ValueError("Not enough market data for the requested range/interval.")
 
     ind = indicators.compute_indicator_frame(df)
+    if req.strategy == "top_bottom":
+        # Causal: computed over the whole frame once, then read per bar.
+        scored = detectors.top_bottom_scores(
+            ind, bottom_threshold=req.tb_bottom_threshold, top_threshold=req.tb_top_threshold
+        )
+        ind = ind.assign(tb_signal=scored["tb_signal"].to_numpy())
     mask = (ind["time"] * 1000) >= start_ms
     window = ind[mask].reset_index(drop=True)
     if window.empty:

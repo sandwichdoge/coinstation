@@ -466,6 +466,11 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
     if price is not None:
         snap.update(support_resistance(df_ind, price))
         snap.update(reversal_signals(df_ind, price))
+        # --- top/bottom detector: the causal, OOS-validated swing-reversal read
+        #     (see detectors.py). Distinct from the single reversal signals above
+        #     — it combines them into one confirmed bottom/top call. ---
+        from . import detectors  # local import keeps module load order simple
+        snap.update(detectors.latest(df_ind))
 
     signals: list[str] = []
     cmf_v = snap.get("cmf")
@@ -515,6 +520,10 @@ def latest_snapshot(df_ind: pd.DataFrame) -> dict:
         signals.append("Bearish rejection wick")
     if (snap.get("macd_hist_streak") or 0) >= 3:
         signals.append(f"MACD histogram {snap['macd_hist_dir']} {snap['macd_hist_streak']} bars")
+    if snap.get("tb_signal") == "bottom":
+        signals.append("Swing bottom detected (top/bottom detector)")
+    elif snap.get("tb_signal") == "top":
+        signals.append("Swing top detected (top/bottom detector)")
     snap["signals"] = signals
 
     first_close = df_ind.iloc[0]["close"]

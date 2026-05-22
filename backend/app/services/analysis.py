@@ -69,6 +69,9 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     hist_below_zero = snapshot.get("macd_hist_below_zero")
     climax = snapshot.get("volume_climax")
     wick = snapshot.get("wick_rejection")
+    tb_signal = snapshot.get("tb_signal")            # "bottom" | "top" | None
+    bottom_score = snapshot.get("bottom_score")
+    top_score = snapshot.get("top_score")
 
     # --- Structural context, computed up front so support/resistance scoring can
     #     reconcile with it. A nearby "resistance" inside an accumulation base is
@@ -355,6 +358,22 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         add(-1.0, "Bearish rejection wick (long upper shadow at the highs) — sellers defending the level")
         risks.append("Upper-shadow rejection flags supply overhead.")
 
+    # Top/bottom detector: the dedicated, out-of-sample-validated swing-reversal
+    # call that fuses the exhaustion reads above into one confirmed bottom/top.
+    # It only fires on a *confirmed* turn (price has stopped making new extremes
+    # and ticked back), so it is high-conviction and weighted accordingly — and
+    # it feeds the strong-call demotion guard below as a structural reversal. The
+    # bottom side is the priority and the better-validated of the two.
+    if tb_signal == "bottom":
+        add(2.0, f"Top/bottom detector: confirmed swing bottom"
+                 f"{f' (score {bottom_score:.1f})' if bottom_score is not None else ''} "
+                 "— major reversal up")
+    elif tb_signal == "top":
+        add(-1.5, f"Top/bottom detector: confirmed swing top"
+                  f"{f' (score {top_score:.1f})' if top_score is not None else ''} "
+                  "— possible reversal down")
+        risks.append("Top detection is the weaker side in trending markets; treat the top call as a caution, not a short.")
+
     score = sum(w for w, _ in contrib)
     gross = sum(abs(w) for w, _ in contrib)
     agreement = abs(score) / gross if gross else 0.0  # 1 = unanimous, 0 = balanced
@@ -376,8 +395,10 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
     #     is the trend-follower's classic mistake (and the mirror at the top). The
     #     score already counts these as positive contributors; this caps the rare
     #     case where the trend/momentum stack still nets past the strong threshold.
-    bottoming = accumulation or climax == "selling" or rsi_div == "bullish" or wick == "bullish"
-    topping = distribution or blowoff or climax == "buying" or rsi_div == "bearish" or wick == "bearish"
+    bottoming = (accumulation or climax == "selling" or rsi_div == "bullish"
+                 or wick == "bullish" or tb_signal == "bottom")
+    topping = (distribution or blowoff or climax == "buying" or rsi_div == "bearish"
+               or wick == "bearish" or tb_signal == "top")
     if action == "strong_sell" and bottoming:
         action = "sell"
         risks.append("Demoted from STRONG SELL: an opposing bottoming signal "
