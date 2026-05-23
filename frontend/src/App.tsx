@@ -93,11 +93,13 @@ export default function App() {
 
   const candles = klines?.candles ?? [];
   const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
   const snap = (klines?.snapshot ?? {}) as Snapshot;
   const indicators = klines?.indicators as Indicators | undefined;
+  // Change vs the previous bar's close (e.g. yesterday's close on a 1d chart),
+  // matching Binance's ticker rather than a whole-window delta.
   const chg =
-    snap.window_change_pct ??
-    (last && candles[0] ? (last.close / candles[0].open - 1) * 100 : undefined);
+    last && prev ? (last.close / prev.close - 1) * 100 : undefined;
 
   return (
     <div className="app">

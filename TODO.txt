@@ -1,4 +1,3 @@
-- Fix run.sh script
 - Add more news sites
 - Entry Finder feature:
  + Compare to BTC's movement - strength in relative to global crypto's sentiment (moves weakly compared to how much BTC moved in the same candle, etc.)

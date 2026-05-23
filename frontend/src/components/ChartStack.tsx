@@ -168,9 +168,9 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
       tip.innerHTML =
         `<div class="cs-tip-date">${date}</div>` +
         `<div class="cs-tip-row"><span>O</span><b>${fmtPrice(o.open)}</b></div>` +
+        `<div class="cs-tip-row"><span>C</span><b style="color:${cls}">${fmtPrice(o.close)}</b></div>` +
         `<div class="cs-tip-row"><span>H</span><b>${fmtPrice(o.high)}</b></div>` +
-        `<div class="cs-tip-row"><span>L</span><b>${fmtPrice(o.low)}</b></div>` +
-        `<div class="cs-tip-row"><span>C</span><b style="color:${cls}">${fmtPrice(o.close)}</b></div>`;
+        `<div class="cs-tip-row"><span>L</span><b>${fmtPrice(o.low)}</b></div>`;
       tip.style.display = "block";
 
       // Keep the tooltip beside the cursor, flipping near the right/bottom edges.
