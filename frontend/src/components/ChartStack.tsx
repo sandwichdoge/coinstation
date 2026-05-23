@@ -11,6 +11,7 @@ import {
 } from "lightweight-charts";
 import type { Candle, ChartMarker, HistPoint, Indicators, LinePoint } from "../types";
 import { baseChartOptions, COLORS } from "./chartTheme";
+import { fmtPrice } from "../util";
 
 const toLine = (pts: LinePoint[]) => pts.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
 const toHist = (pts: HistPoint[]) =>
@@ -42,6 +43,7 @@ interface Props {
 
 export function ChartStack({ candles, indicators, markers, heights }: Props) {
   const priceEl = useRef<HTMLDivElement>(null);
+  const tipEl = useRef<HTMLDivElement>(null);
   const volEl = useRef<HTMLDivElement>(null);
   const rsiEl = useRef<HTMLDivElement>(null);
   const macdEl = useRef<HTMLDivElement>(null);
@@ -85,6 +87,8 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
       wickUpColor: COLORS.up,
       wickDownColor: COLORS.down,
     });
+    // Trim the default top/bottom padding so candles fill the pane.
+    price.priceScale("right").applyOptions({ scaleMargins: { top: 0.06, bottom: 0.08 } });
     const volume = vol.addHistogramSeries({
       priceFormat: { type: "volume" },
       priceLineVisible: false,
@@ -143,6 +147,43 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
       if (w > 0) charts.forEach((c) => c.applyOptions({ width: w }));
     });
     if (priceEl.current) ro.observe(priceEl.current);
+
+    // ---- OHLC tooltip following the cursor on the price pane ----
+    price.subscribeCrosshairMove((param) => {
+      const tip = tipEl.current;
+      const host = priceEl.current;
+      if (!tip || !host) return;
+      const bar = param.time && param.point ? param.seriesData.get(candle) : undefined;
+      if (!bar || !param.point) {
+        tip.style.display = "none";
+        return;
+      }
+      const o = bar as unknown as { open: number; high: number; low: number; close: number };
+      const date = new Date((param.time as number) * 1000).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+      const cls = o.close >= o.open ? COLORS.up : COLORS.down;
+      tip.innerHTML =
+        `<div class="cs-tip-date">${date}</div>` +
+        `<div class="cs-tip-row"><span>O</span><b>${fmtPrice(o.open)}</b></div>` +
+        `<div class="cs-tip-row"><span>H</span><b>${fmtPrice(o.high)}</b></div>` +
+        `<div class="cs-tip-row"><span>L</span><b>${fmtPrice(o.low)}</b></div>` +
+        `<div class="cs-tip-row"><span>C</span><b style="color:${cls}">${fmtPrice(o.close)}</b></div>`;
+      tip.style.display = "block";
+
+      // Keep the tooltip beside the cursor, flipping near the right/bottom edges.
+      const pad = 12;
+      const w = tip.offsetWidth;
+      const h = tip.offsetHeight;
+      let left = param.point.x + pad;
+      if (left + w > host.clientWidth) left = param.point.x - w - pad;
+      let top = param.point.y + pad;
+      if (top + h > host.clientHeight) top = host.clientHeight - h - 2;
+      tip.style.left = `${Math.max(2, left)}px`;
+      tip.style.top = `${Math.max(2, top)}px`;
+    });
 
     return () => {
       ro.disconnect();
@@ -213,7 +254,10 @@ export function ChartStack({ candles, indicators, markers, heights }: Props) {
 
   return (
     <div className="chart-stack">
-      <div className="chart-pane" ref={priceEl} />
+      <div className="chart-pane price-pane">
+        <div ref={priceEl} />
+        <div className="cs-tooltip" ref={tipEl} />
+      </div>
       <div className="chart-pane-label">Volume (MA 20)</div>
       <div className="chart-pane" ref={volEl} />
       <div className="chart-pane-label">RSI ({(indicators as Indicators)?.rsi?.period ?? 14})</div>

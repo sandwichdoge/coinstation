@@ -98,6 +98,25 @@ select:focus, input:focus { border-color: var(--accent); }
 /* Chart */
 .chart-stack { display: flex; flex-direction: column; }
 .chart-pane { width: 100%; }
+.price-pane { position: relative; }
+.cs-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 116px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: rgba(14, 15, 20, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text, #c7c9d1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.cs-tip-date { font-weight: 600; margin-bottom: 3px; }
+.cs-tip-row { display: flex; justify-content: space-between; gap: 12px; }
+.cs-tip-row span { color: var(--muted); }
 .chart-pane-label { font-size: 11px; color: var(--muted); padding: 6px 2px 2px; border-top: 1px solid var(--border); }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-top: 8px; }
 .legend span::before { content: "—"; margin-right: 4px; font-weight: 700; }
