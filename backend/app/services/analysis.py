@@ -22,9 +22,39 @@ def _horizon(interval: str) -> str:
     }.get(interval, "swing (days-weeks)")
 
 
+# ---- cross-timeframe context ----------------------------------------------
+
+def _trend_bias(snap: dict | None) -> tuple[float, str]:
+    """Collapse a neighbouring timeframe's snapshot into one directional read in
+    [-1, 1] (+ a human label). Trend-only on purpose: this is *context*, so it
+    blends the EMA regime, price-vs-mean and recent drift — the slow, structural
+    reads — and deliberately ignores the fast oscillators the base timeframe
+    already scores in detail. Returns (0.0, "no data") when the snapshot is
+    missing or too thin to judge."""
+    if not snap:
+        return 0.0, "no data"
+    parts: list[float] = []
+    ema50, ema200 = snap.get("ema50"), snap.get("ema200")
+    if ema50 is not None and ema200:
+        parts.append(max(-1.0, min(1.0, (ema50 - ema200) / ema200 * 100 / 4.0)))  # EMA regime
+    price = snap.get("price")
+    ref = ema50 if ema50 is not None else snap.get("ema20")
+    if price is not None and ref:
+        parts.append(max(-1.0, min(1.0, (price - ref) / ref * 100 / 3.0)))        # price vs mean
+    drift = snap.get("recent_change_pct")
+    if drift is not None:
+        parts.append(max(-1.0, min(1.0, drift / 10.0)))                            # realised drift
+    if not parts:
+        return 0.0, "no data"
+    bias = sum(parts) / len(parts)
+    label = "uptrend" if bias >= 0.15 else "downtrend" if bias <= -0.15 else "sideways"
+    return round(bias, 3), label
+
+
 # ---- rule-based fallback --------------------------------------------------
 
-def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
+def _heuristic(snapshot: dict, headlines: list[dict], interval: str,
+               context: dict | None = None) -> dict:
     """Transparent, internally-consistent scorer.
 
     Philosophy: trend-following with momentum confirmation. Mean-reversion only
@@ -374,6 +404,33 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
                   "— possible reversal down")
         risks.append("Top detection is the weaker side in trending markets; treat the top call as a caution, not a short.")
 
+    # --- Multi-timeframe context ----------------------------------------
+    # Everything above reads a single timeframe. A signal that aligns across
+    # timeframes is far more trustworthy than one fighting the bigger picture:
+    # the higher timeframe is the tide (the dominant trend you don't want to
+    # trade against), the lower timeframe the ripples (entry timing). We fold a
+    # compact trend read of each neighbour into the score — the higher carrying
+    # real weight, the lower a light timing tilt — and remember a clear
+    # higher-TF conflict for the strong-call guard below.
+    higher_down = higher_up = False
+    if context:
+        hi_int = context.get("higher_interval")
+        lo_int = context.get("lower_interval")
+        hi_bias, hi_label = _trend_bias(context.get("higher"))
+        lo_bias, lo_label = _trend_bias(context.get("lower"))
+        if hi_int and hi_label != "no data":
+            w = round(1.5 * hi_bias, 2)
+            if abs(w) >= 0.05:
+                add(w, f"Higher timeframe ({hi_int}) {hi_label} "
+                       f"(bias {hi_bias:+.2f}) — broader trend context")
+            higher_down = hi_bias <= -0.4
+            higher_up = hi_bias >= 0.4
+        if lo_int and lo_label != "no data":
+            w = round(0.6 * lo_bias, 2)
+            if abs(w) >= 0.05:
+                add(w, f"Lower timeframe ({lo_int}) {lo_label} "
+                       f"(bias {lo_bias:+.2f}) — near-term timing")
+
     score = sum(w for w, _ in contrib)
     gross = sum(abs(w) for w, _ in contrib)
     agreement = abs(score) / gross if gross else 0.0  # 1 = unanimous, 0 = balanced
@@ -408,6 +465,22 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         risks.append("Demoted from STRONG BUY: an opposing topping signal "
                      "(distribution / blow-off / bearish divergence) is active.")
 
+    # --- Higher-timeframe conflict guard: don't fire a *strong* call straight
+    #     against the tide. A STRONG BUY while the higher timeframe is in a clear
+    #     downtrend (or STRONG SELL into a clear uptrend) is exactly the
+    #     counter-trend overreach that gets run over — unless the turn is already
+    #     showing structural reversal evidence on this timeframe, in which case
+    #     it's a legitimate early entry and we leave it. The bias term above has
+    #     already tilted the score; this only caps the residual strong call.
+    if action == "strong_buy" and higher_down and not bottoming:
+        action = "buy"
+        risks.append(f"Demoted from STRONG BUY: the higher timeframe "
+                     f"({context.get('higher_interval')}) is still in a downtrend.")
+    elif action == "strong_sell" and higher_up and not topping:
+        action = "sell"
+        risks.append(f"Demoted from STRONG SELL: the higher timeframe "
+                     f"({context.get('higher_interval')}) is still in an uptrend.")
+
     # Conviction scales with both signal magnitude and how much they agree.
     conf = (50.0 + 8.0 * abs(score)) * (0.6 + 0.4 * agreement)
     confidence = round(min(92.0, max(45.0, conf)), 1)
@@ -428,7 +501,8 @@ def _heuristic(snapshot: dict, headlines: list[dict], interval: str) -> dict:
         " position, volume, Chaikin money flow, swing support/resistance, an"
         " accumulation/distribution read and candle/reversal signals (RSI"
         " divergence, MACD-histogram turns, volume climaxes, rejection wicks) into"
-        " a single score;"
+        " a single score, cross-checked against the higher- and lower-timeframe"
+        " trend;"
         " mean-reversion only at RSI/band extremes or established support/resistance."
         + chg_txt
         + news_txt
@@ -455,9 +529,10 @@ async def analyze(
     as_of_ms: int,
     snapshot: dict,
     headlines: list[dict],
+    context: dict | None = None,
 ) -> AnalysisResult:
     as_of_iso = ms_to_iso(as_of_ms)
-    core = _heuristic(snapshot, headlines, interval)
+    core = _heuristic(snapshot, headlines, interval, context)
 
     return AnalysisResult(
         symbol=symbol,

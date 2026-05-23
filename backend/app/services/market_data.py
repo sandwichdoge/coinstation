@@ -30,6 +30,35 @@ INTERVAL_MS: dict[str, int] = {
 }
 VALID_INTERVALS = set(INTERVAL_MS) | {"1M"}
 
+# Ordered, fine -> coarse, including the calendar-month bar (~30 days) so the
+# multi-timeframe context can reach the very top of the ladder.
+INTERVAL_LADDER: list[tuple[str, int]] = sorted(
+    {**INTERVAL_MS, "1M": 2_592_000_000}.items(), key=lambda kv: kv[1]
+)
+
+# A "higher" / "lower" timeframe is only useful if it is materially coarser /
+# finer than the base — stepping 1h -> 2h tells you almost nothing new. We pick
+# the nearest neighbour at least this many times the base interval away, so the
+# context genuinely zooms out (the tide) and in (the ripples).
+NEIGHBOR_RATIO = 3.5
+
+
+def neighbor_intervals(interval: str) -> tuple[str | None, str | None]:
+    """Return ``(higher, lower)`` timeframes flanking `interval` on the ladder.
+
+    `higher` is the finest interval at least ``NEIGHBOR_RATIO``x coarser than the
+    base; `lower` the coarsest interval at least that much finer. Either is
+    ``None`` at the ends of the ladder (no 1m has a meaningful lower; 1M has no
+    higher)."""
+    base = dict(INTERVAL_LADDER).get(interval)
+    if base is None:
+        return None, None
+    higher = next((name for name, ms in INTERVAL_LADDER if ms >= base * NEIGHBOR_RATIO), None)
+    lower = next(
+        (name for name, ms in reversed(INTERVAL_LADDER) if ms * NEIGHBOR_RATIO <= base), None
+    )
+    return higher, lower
+
 # Curated popular USDT pairs for the picker. Users may request any valid symbol;
 # this is just a convenient default list.
 POPULAR_SYMBOLS: list[dict[str, str]] = [
