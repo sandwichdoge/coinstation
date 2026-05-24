@@ -6,6 +6,7 @@ aggregation, rule-based analysis, and a **date-aware backtester**.
 - 📈 **Live & historical candlestick charts** (TradingView lightweight-charts) with volume, EMA 20/50/200, Bollinger Bands, **RSI** and **MACD** panes — all time-synced.
 - 📰 **News aggregation** from RSS, stored in a timestamped archive.
 - 🤖 **Rule-based analysis** — a transparent, auditable scorer turns the technical snapshot into an `action` + 0–100 `confidence` + rationale. No API keys required; every signal that fires is recorded in the rationale.
+- 🧲 **Decouple meter** — treats BTC as the king / global-sentiment proxy and scores how independently a coin trades from it: per-candle returns are regressed against BTC for correlation, beta, and a beta-adjusted relative strength, yielding a 0–100 `decouple_score` (1 − R²) and a coupled / loosening / decoupled / inverse read.
 - ⏪ **Backtesting** with a real *date mechanism* — every data path (prices, indicators, news, analysis) is anchored to an `as_of` timestamp, so you can replay a strategy "as if it were that date."
 
 > ⚠️ Educational tool, **not financial advice**.
@@ -77,6 +78,7 @@ npm run dev                   # http://localhost:5173 (proxies /api -> :8000)
 | POST | `/api/news/ingest` | Pull RSS feeds into the archive now. |
 | GET | `/api/news/stats` | Item count. |
 | POST | `/api/analyze` | `{symbol, interval, as_of?}` → action + confidence + rationale. |
+| GET | `/api/decouple` | Decoupling from BTC. `?symbol&interval&as_of&window` → decouple score + correlation/beta + relative strength. |
 | POST | `/api/backtest` | `{symbol, interval, start, end?, strategy, …}` → metrics + equity curve + trades. |
 
 Backtest strategies: `macd`, `rsi`, `ema_cross`, `rules`, `buy_hold`.
@@ -106,12 +108,13 @@ coinstation/
 │   │   ├── config.py        # env settings
 │   │   ├── db.py · models.py # SQLAlchemy + NewsItem archive
 │   │   ├── schemas.py · timeutil.py
-│   │   ├── routers/         # market · news · analysis · backtest
+│   │   ├── routers/         # market · news · analysis · decouple · backtest
 │   │   └── services/
 │   │       ├── market_data.py   # Binance, date-aware klines
 │   │       ├── indicators.py    # RSI/MACD/EMA/Bollinger/Volume (pandas)
 │   │       ├── news.py          # RSS ingest + as-of query
 │   │       ├── analysis.py      # rule-based scorer
+│   │       ├── decouple.py      # BTC-relative decouple meter
 │   │       └── backtest.py      # date-aware engine
 │   └── requirements.txt · Dockerfile
 └── frontend/                # React + TypeScript + Vite
@@ -121,7 +124,7 @@ coinstation/
             ├── ChartStack.tsx   # synced price/RSI/MACD panes
             ├── EquityChart.tsx
             ├── Controls.tsx · NewsPanel.tsx
-            ├── AnalysisPanel.tsx · BacktestPanel.tsx
+            ├── AnalysisPanel.tsx · DecouplePanel.tsx · BacktestPanel.tsx
 ```
 
 ---

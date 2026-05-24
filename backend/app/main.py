@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .db import SessionLocal, init_db
-from .routers import analysis, backtest, market, news
+from .routers import analysis, backtest, decouple, market, news
 from .services import news as news_svc
 
 
@@ -52,3 +52,4 @@ app.include_router(market.router)
 app.include_router(news.router)
 app.include_router(analysis.router)
 app.include_router(backtest.router)
+app.include_router(decouple.router)

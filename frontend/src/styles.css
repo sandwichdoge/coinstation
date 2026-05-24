@@ -181,3 +181,33 @@ select:focus, input:focus { border-color: var(--accent); }
 .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .section-gap { margin-top: 16px; }
+
+/* ---- Decouple meter ---------------------------------------------------- */
+/* Colour ramp: coupled (calm/accent) → loosening (amber) → decoupled (green),
+   with inverse as a distinct violet — moving against BTC is its own regime. */
+.decouple .dc-gauge-row { display: flex; gap: 12px; align-items: center; margin: 4px 0 10px; }
+.dc-score { font-size: 30px; font-weight: 700; line-height: 1; min-width: 52px; text-align: center; }
+.dc-gauge-body { flex: 1; }
+.dc-gauge-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.dc-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.3px; }
+.dc-dir { font-size: 11px; font-weight: 600; }
+.dc-dir-strength { color: var(--green); }
+.dc-dir-weakness { color: var(--red); }
+.dc-bar { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.dc-fill { height: 100%; border-radius: 999px; transition: width 0.3s ease; }
+.dc-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.dc-summary { font-size: 13px; margin: 8px 0; }
+
+/* coupling colour by regime */
+.dc-coupled.dc-score, .dc-coupled.dc-badge { color: var(--accent); }
+.dc-coupled.dc-badge { background: rgba(76, 201, 240, 0.14); }
+.dc-coupled.dc-fill { background: var(--accent); }
+.dc-loosening.dc-score, .dc-loosening.dc-badge { color: #e0a23a; }
+.dc-loosening.dc-badge { background: rgba(224, 162, 58, 0.16); }
+.dc-loosening.dc-fill { background: #e0a23a; }
+.dc-decoupled.dc-score, .dc-decoupled.dc-badge { color: var(--green); }
+.dc-decoupled.dc-badge { background: var(--green-soft); }
+.dc-decoupled.dc-fill { background: var(--green); }
+.dc-inverse.dc-score, .dc-inverse.dc-badge { color: #b08cff; }
+.dc-inverse.dc-badge { background: rgba(176, 140, 255, 0.16); }
+.dc-inverse.dc-fill { background: #b08cff; }

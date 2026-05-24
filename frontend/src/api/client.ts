@@ -2,6 +2,7 @@ import type {
   AnalysisResult,
   BacktestResult,
   Coin,
+  DecoupleResult,
   Health,
   KlinesResponse,
   NewsItem,
@@ -80,4 +81,6 @@ export const api = {
     http<AnalysisResult>("/analyze", { method: "POST", body: JSON.stringify(body) }),
   backtest: (body: BacktestBody) =>
     http<BacktestResult>("/backtest", { method: "POST", body: JSON.stringify(body) }),
+  decouple: (p: { symbol: string; interval: string; as_of?: string; window?: number }) =>
+    http<DecoupleResult>(`/decouple${qs({ ...p })}`),
 };

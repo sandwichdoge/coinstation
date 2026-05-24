@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api/client";
-import type { AnalysisResult, Coin, Health, Indicators, KlinesResponse, NewsItem, Snapshot } from "./types";
+import type { AnalysisResult, Coin, DecoupleResult, Health, Indicators, KlinesResponse, NewsItem, Snapshot } from "./types";
 import { Controls } from "./components/Controls";
 import { ChartStack } from "./components/ChartStack";
 import { NewsPanel } from "./components/NewsPanel";
 import { AnalysisPanel } from "./components/AnalysisPanel";
+import { DecouplePanel } from "./components/DecouplePanel";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { COLORS } from "./components/chartTheme";
 import { daysAgoISO, errMsg, fmtPct, fmtPrice } from "./util";
@@ -31,6 +32,10 @@ export default function App() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
+  const [decouple, setDecouple] = useState<DecoupleResult | null>(null);
+  const [decoupleLoading, setDecoupleLoading] = useState(false);
+  const [decoupleError, setDecoupleError] = useState<string | null>(null);
+
   const asOf = mode === "range" && end ? end : undefined;
 
   useEffect(() => {
@@ -56,6 +61,19 @@ export default function App() {
     }
   }, [symbol, interval, mode, start, end]);
 
+  const fetchDecouple = useCallback(async () => {
+    setDecoupleLoading(true);
+    setDecoupleError(null);
+    try {
+      setDecouple(await api.decouple({ symbol, interval, as_of: asOf }));
+    } catch (e) {
+      setDecoupleError(errMsg(e));
+      setDecouple(null);
+    } finally {
+      setDecoupleLoading(false);
+    }
+  }, [symbol, interval, asOf]);
+
   const fetchNews = useCallback(async () => {
     setNewsLoading(true);
     try {
@@ -77,6 +95,10 @@ export default function App() {
     fetchNews();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, asOf]);
+  useEffect(() => {
+    fetchDecouple();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, interval, asOf]);
 
   async function runAnalyze() {
     setAnalysisLoading(true);
@@ -131,6 +153,7 @@ export default function App() {
         onRefresh={() => {
           fetchChart();
           fetchNews();
+          fetchDecouple();
         }}
         loading={chartLoading}
       />
@@ -179,6 +202,7 @@ export default function App() {
             error={analysisError}
             onAnalyze={runAnalyze}
           />
+          <DecouplePanel result={decouple} loading={decoupleLoading} error={decoupleError} />
           <NewsPanel items={news} loading={newsLoading} asOf={asOf} onRefresh={fetchNews} />
         </div>
       </div>

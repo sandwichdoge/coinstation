@@ -155,3 +155,31 @@ export interface Health {
   status: string;
   engine?: string;
 }
+
+export type Coupling = "coupled" | "loosening" | "decoupled" | "inverse";
+
+export interface DecoupleMeter {
+  available: boolean;
+  reason?: string;
+  decouple_score?: number; // 0..100, fraction of variance independent of BTC
+  coupling?: Coupling;
+  direction?: "strength" | "weakness" | "neutral";
+  correlation?: number; // -1..1
+  beta?: number | null;
+  relative_strength_pct?: number; // raw coin% − BTC% over the window
+  alpha_pct?: number | null; // beta-adjusted excess
+  coin_change_pct?: number;
+  btc_change_pct?: number;
+  samples?: number;
+  summary?: string;
+}
+
+export interface DecoupleResult {
+  symbol: string;
+  reference: string;
+  interval: string;
+  as_of: string;
+  window: number;
+  is_reference: boolean;
+  meter: DecoupleMeter;
+}
